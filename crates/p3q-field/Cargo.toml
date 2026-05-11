@@ -1,0 +1,19 @@
+[package]
+name            = "p3q-field"
+description     = "P3Q field primitives (Goldilocks 2^64 - 2^32 + 1) for the strict-PQ Plonky3 fork."
+version.workspace      = true
+authors.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+rust-version.workspace = true
+keywords        = ["zk", "stark", "field", "goldilocks", "post-quantum"]
+categories      = ["cryptography"]
+
+[dependencies]
+p3q-core = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

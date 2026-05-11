@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/p3q-core",
+    "crates/p3q-field",
+    "crates/p3q-fri",
+    "crates/p3q-merkle",
+    "crates/p3q-stark",
+    "crates/p3q-recursion",
+    "crates/p3q-challenger",
+    "crates/p3q-verifier",
+    "crates/p3q-sha3",
+    "crates/p3q-zchain",
+]
+
+[workspace.package]
+version = "0.0.1"
+authors = ["Lux Industries Inc <dev@lux.network>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/luxfi/p3q"
+homepage = "https://github.com/luxfi/p3q"
+description = "P3Q — post-quantum-only profile and fork of Plonky3 for Lux Z-Chain (HIP-0078). Strict STARK/FRI/SHA-3 only; no KZG, no BN254, no Groth16, no PLONK, no pairings."
+keywords = ["zk", "stark", "fri", "post-quantum", "plonky3"]
+categories = ["cryptography"]
+rust-version = "1.79"
+
+[workspace.dependencies]
+# Internal crates — pinned to workspace version.
+p3q-core        = { version = "0.0.1", path = "crates/p3q-core" }
+p3q-field       = { version = "0.0.1", path = "crates/p3q-field" }
+p3q-fri         = { version = "0.0.1", path = "crates/p3q-fri" }
+p3q-merkle      = { version = "0.0.1", path = "crates/p3q-merkle" }
+p3q-stark       = { version = "0.0.1", path = "crates/p3q-stark" }
+p3q-recursion   = { version = "0.0.1", path = "crates/p3q-recursion" }
+p3q-challenger  = { version = "0.0.1", path = "crates/p3q-challenger" }
+p3q-verifier    = { version = "0.0.1", path = "crates/p3q-verifier" }
+p3q-sha3        = { version = "0.0.1", path = "crates/p3q-sha3" }
+p3q-zchain      = { version = "0.0.1", path = "crates/p3q-zchain" }
+
+# External — only PQ-safe primitives.
+sha3            = "0.10"  # FIPS 202: SHA-3, SHAKE128/256, cSHAKE
+hex             = "0.4"
+thiserror       = "1.0"
+
+[workspace.lints.rust]
+unsafe_code     = "deny"  # P3Q code MUST NOT use `unsafe`. Audited subset.
+
+[profile.release]
+opt-level       = 3
+lto             = "thin"
+codegen-units   = 1
+debug           = false
+panic           = "abort"
+
+[profile.bench]
+opt-level       = 3
+lto             = "thin"
+debug           = true     # benches need symbols for flamegraphs
+
+[profile.test]
+opt-level       = 1        # fast test compile; correctness > speed in dev

@@ -1,0 +1,20 @@
+[package]
+name            = "p3q-merkle"
+description     = "P3Q hash-based Merkle trees (cSHAKE256) for the strict-PQ Plonky3 fork."
+version.workspace      = true
+authors.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+rust-version.workspace = true
+keywords        = ["merkle", "post-quantum", "cshake", "stark"]
+categories      = ["cryptography"]
+
+[dependencies]
+p3q-core  = { workspace = true }
+p3q-field = { workspace = true }
+p3q-sha3  = { workspace = true }
+
+[lints]
+workspace = true

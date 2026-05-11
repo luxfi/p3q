@@ -1,0 +1,22 @@
+[package]
+name            = "p3q-stark"
+description     = "P3Q STARK arithmetisation (AIR) traits for the strict-PQ Plonky3 fork."
+version.workspace      = true
+authors.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+rust-version.workspace = true
+keywords        = ["stark", "air", "post-quantum", "zk"]
+categories      = ["cryptography"]
+
+[dependencies]
+p3q-core       = { workspace = true }
+p3q-field      = { workspace = true }
+p3q-fri        = { workspace = true }
+p3q-merkle     = { workspace = true }
+p3q-challenger = { workspace = true }
+
+[lints]
+workspace = true

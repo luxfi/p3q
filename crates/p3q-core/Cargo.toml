@@ -1,0 +1,18 @@
+[package]
+name            = "p3q-core"
+description     = "P3Q core protocol types, error model, and common traits for the strict-PQ Plonky3 fork."
+version.workspace      = true
+authors.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+rust-version.workspace = true
+keywords        = ["zk", "stark", "fri", "post-quantum"]
+categories      = ["cryptography"]
+
+[dependencies]
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
