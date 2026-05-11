@@ -1,0 +1,19 @@
+[package]
+name            = "p3q-sha3"
+description     = "P3Q FIPS 202 / SP 800-185 primitives (cSHAKE256, KMAC256, TupleHash256) for the strict-PQ Plonky3 fork."
+version.workspace      = true
+authors.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+rust-version.workspace = true
+keywords        = ["sha3", "cshake", "kmac", "post-quantum", "fips202"]
+categories      = ["cryptography"]
+
+[dependencies]
+p3q-core = { workspace = true }
+sha3 = { workspace = true }
+
+[lints]
+workspace = true

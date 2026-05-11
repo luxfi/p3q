@@ -1,0 +1,20 @@
+[package]
+name            = "p3q-recursion"
+description     = "P3Q-native STARK recursion (no elliptic-curve wrappers) for the strict-PQ Plonky3 fork."
+version.workspace      = true
+authors.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+rust-version.workspace = true
+keywords        = ["stark", "recursion", "post-quantum", "zk"]
+categories      = ["cryptography"]
+
+[dependencies]
+p3q-core  = { workspace = true }
+p3q-field = { workspace = true }
+p3q-stark = { workspace = true }
+
+[lints]
+workspace = true

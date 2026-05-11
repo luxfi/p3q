@@ -1,0 +1,22 @@
+# P3Q strict-PQ forbidden imports — canonical list.
+#
+# Format: one token per line, lowercase, no quotes.
+# `scripts/lint_forbidden.sh` is the enforcer; this file is the spec.
+#
+# Anything on this list is rejected when it appears:
+#   * as a Cargo dependency name (e.g. `bn254 = "..."`,
+#     `[dependencies.bn254]`)
+#   * as a Rust `use` / `extern crate` / `mod` import
+#
+# Documentation prose IS allowed to mention the names by content. The
+# lint distinguishes "mentioned in a comment" from "actually imported".
+
+bn254
+kzg
+groth16
+plonk_kzg
+halo
+blake3
+poseidon
+monolith
+rescue
