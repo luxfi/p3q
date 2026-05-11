@@ -14,7 +14,7 @@ strips every classical proof-system path.
 The strict Lux Z-Chain profile is **P3Q-SHA3**: cSHAKE256 / KMAC256 /
 TupleHash256 (FIPS 202 + NIST SP 800-185) replaces every default Keccak
 or SHA-256 hash inside Merkle trees, FRI commitments, and Fiat-Shamir
-transforms. Same hash family as ML-DSA-65 (FIPS 204) and Pulsar-M
+transforms. Same hash family as ML-DSA-65 (FIPS 204) and Pulsar
 (HIP-0084) — single auditable surface across the entire Lux PQ stack.
 
 > **Status: under construction.** The crate workspace is scaffolded;
@@ -109,7 +109,7 @@ periodic upstream-merge PRs that the audit team reviews before landing.
 - **validator_registration_circuit** — verifies an ML-DSA-65
   identity signature against a registering pubkey under unmodified
   FIPS 204 ML-DSA.Verify.
-- **dkg_transcript_circuit** — checks Pulsar-M DKG transcript
+- **dkg_transcript_circuit** — checks Pulsar DKG transcript
   consistency against the committee root.
 - **revocation_circuit** — verifies revocation signatures.
 - **committee_selection_circuit** — checks committee derivation from
@@ -144,5 +144,5 @@ and `LICENSE-APACHE`.
 - HIP-0077 — Mesh Identity, Gossip & Payments (parent)
 - HIP-0078 — Z-Chain PQ Identity & Attestation Rollup (downstream consumer)
 - HIP-0079 — Q-Chain Finality Block Standard (anchors Z-Chain roots)
-- HIP-0084 — Pulsar-M Threshold ML-DSA DKG & Signing
+- HIP-0084 — Pulsar Threshold ML-DSA DKG & Signing
 - Upstream Plonky3 — https://github.com/Plonky3/Plonky3
