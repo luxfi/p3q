@@ -19,8 +19,8 @@
 pub mod committee;
 pub mod dkg;
 pub mod epoch;
-pub mod revocation;
 pub mod registration;
+pub mod revocation;
 pub mod rotation;
 
 pub use committee::SelectEpochCommittee;
@@ -42,12 +42,12 @@ pub type Epoch = u64;
 /// Shared error returned by every circuit's `build_air`.
 fn not_yet_audit_gated(name: &'static str) -> P3qError {
     P3qError::Circuit(match name {
-        "register_validator"        => "register_validator circuit body audit-gated",
-        "rotate_identity_key"       => "rotate_identity_key circuit body audit-gated",
-        "revoke_identity_key"       => "revoke_identity_key circuit body audit-gated",
-        "select_epoch_committee"    => "select_epoch_committee circuit body audit-gated",
-        "commit_dkg_output"         => "commit_dkg_output circuit body audit-gated",
-        "produce_epoch_commitment"  => "produce_epoch_commitment circuit body audit-gated",
-        _                           => "z-chain circuit body audit-gated",
+        "register_validator" => "register_validator circuit body audit-gated",
+        "rotate_identity_key" => "rotate_identity_key circuit body audit-gated",
+        "revoke_identity_key" => "revoke_identity_key circuit body audit-gated",
+        "select_epoch_committee" => "select_epoch_committee circuit body audit-gated",
+        "commit_dkg_output" => "commit_dkg_output circuit body audit-gated",
+        "produce_epoch_commitment" => "produce_epoch_commitment circuit body audit-gated",
+        _ => "z-chain circuit body audit-gated",
     })
 }

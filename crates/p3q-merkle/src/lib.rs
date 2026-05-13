@@ -109,12 +109,7 @@ pub struct MerkleProof {
 ///
 /// Returns `Ok(())` if the path reproduces `root`, else
 /// `P3qError::MerkleAuth`.
-pub fn verify_proof(
-    root: &Digest,
-    leaf: &[u8],
-    index: usize,
-    proof: &MerkleProof,
-) -> Result<()> {
+pub fn verify_proof(root: &Digest, leaf: &[u8], index: usize, proof: &MerkleProof) -> Result<()> {
     let mut acc = hash_leaf(leaf);
     let mut idx = index;
     for sib in &proof.siblings {

@@ -7,7 +7,7 @@ use p3q_core::Result;
 use p3q_field::Goldilocks;
 use p3q_stark::Air;
 
-use crate::{Epoch, not_yet_audit_gated};
+use crate::{not_yet_audit_gated, Epoch};
 
 /// Public input + witness for the `produce_epoch_commitment` circuit.
 #[derive(Debug, Clone)]

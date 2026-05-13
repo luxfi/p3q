@@ -120,7 +120,9 @@ impl Field for Goldilocks {
 
     fn from_bytes(bytes: &[u8]) -> Result<Self, P3qError> {
         if bytes.len() != Self::BYTES {
-            return Err(P3qError::InvalidEncoding("goldilocks element must be 8 bytes"));
+            return Err(P3qError::InvalidEncoding(
+                "goldilocks element must be 8 bytes",
+            ));
         }
         let mut buf = [0u8; 8];
         buf.copy_from_slice(bytes);
@@ -266,7 +268,10 @@ mod tests {
         for &x in inputs {
             let want = (x % P as u128) as u64;
             let got = Goldilocks::reduce_u128(x).0;
-            assert_eq!(got, want, "reduce_u128({x:#034x}) = {got:#018x} but expected {want:#018x}");
+            assert_eq!(
+                got, want,
+                "reduce_u128({x:#034x}) = {got:#018x} but expected {want:#018x}"
+            );
         }
     }
 
@@ -275,9 +280,13 @@ mod tests {
         // Pseudo-random LCG; deterministic so the test is reproducible.
         let mut s: u64 = 0xDEAD_BEEF_CAFE_BABE;
         for _ in 0..1024 {
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let a = s % P;
-            s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let b = s % P;
             let want = ((a as u128) * (b as u128) % (P as u128)) as u64;
             let got = (Goldilocks(a) * Goldilocks(b)).0;
