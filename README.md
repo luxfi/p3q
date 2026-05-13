@@ -17,10 +17,40 @@ or SHA-256 hash inside Merkle trees, FRI commitments, and Fiat-Shamir
 transforms. Same hash family as ML-DSA-65 (FIPS 204) and Pulsar
 (HIP-0084) — single auditable surface across the entire Lux PQ stack.
 
-> **Status: under construction.** The crate workspace is scaffolded;
-> the cSHAKE256 Merkle/Fiat-Shamir replacement and the Z-Chain
-> integration are in flight. Pin to a tagged release before depending
-> on P3Q from a downstream consumer.
+> **Status: scaffold + stable surface, audit-gated body pending.**
+> Pin to a tagged release before depending on P3Q from a downstream
+> consumer. Current released tag: **`v0.0.1`**.
+
+### What's stable in `v0.0.1`
+
+- Workspace layout, crate boundaries, public types
+  (`ProofBytes`, `ProofSystemId`, `P3qError`, `Result`).
+- Goldilocks field arithmetic (`p3q-field`).
+- SHA3 / cSHAKE256 / KMAC256 / TupleHash256 bindings (`p3q-sha3`) —
+  FIPS 202 + SP 800-185.
+- Merkle tree primitives (`p3q-merkle`).
+- FRI low-degree test plumbing (`p3q-fri`).
+- Fiat-Shamir challenger transcript (`p3q-challenger`).
+- AIR / STARK trait surface (`p3q-stark`).
+- Verifier dispatch + profile byte handling (`p3q-verifier`):
+  malformed input is rejected with a typed `P3qError`, never a panic.
+- `scripts/lint_forbidden.sh` CI gate against banned imports.
+- Test suite: 43 unit tests pass, zero failures.
+
+### What's WIP (returns `P3qError`, never panics)
+
+- `p3q-verifier::verify_sha3` / `verify_keccak` — audit-gated proof
+  body verification. Currently returns
+  `P3qError::StarkVerification("…not yet audit-gated")`.
+- `p3q-zchain` circuits — all six `build_air()` constructors
+  (`register_validator`, `rotate_identity_key`, `revoke_identity_key`,
+  `select_epoch_committee`, `commit_dkg_output`,
+  `produce_epoch_commitment`) return `P3qError` until the audited
+  bodies land.
+- Constant-time verifier certification (annotation pending audit).
+
+Downstream consumers can depend on the type surface today; production
+proof verification is gated behind subsequent `v0.0.x` releases.
 
 ## Why a fork
 
