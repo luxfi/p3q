@@ -1,0 +1,33 @@
+{
+  "name": "@luxfi/p3q-evm",
+  "version": "0.0.1",
+  "description": "P3Q — post-quantum-only profile and fork of Plonky3 for Lux Z-Chain (HIP-0078). EVM verifier surface (Solidity). Strict STARK/FRI/SHA-3 only; no KZG, no BN254, no Groth16, no PLONK, no pairings.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luxfi/p3q.git",
+    "directory": "contracts"
+  },
+  "homepage": "https://github.com/luxfi/p3q",
+  "bugs": {
+    "url": "https://github.com/luxfi/p3q/issues"
+  },
+  "author": "Lux Industries Inc <dev@lux.network>",
+  "main": "src/index.sol",
+  "files": [
+    "src/**/*.sol",
+    "README.md"
+  ],
+  "keywords": [
+    "p3q",
+    "stark",
+    "fri",
+    "sha3",
+    "post-quantum",
+    "plonky3",
+    "lux",
+    "z-chain",
+    "verifier",
+    "solidity"
+  ]
+}
