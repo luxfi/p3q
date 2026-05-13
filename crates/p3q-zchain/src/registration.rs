@@ -8,7 +8,7 @@ use p3q_core::Result;
 use p3q_field::Goldilocks;
 use p3q_stark::Air;
 
-use crate::{Epoch, ValidatorId, not_yet_audit_gated};
+use crate::{not_yet_audit_gated, Epoch, ValidatorId};
 
 /// Public input + witness for the `register_validator` circuit.
 #[derive(Debug, Clone)]

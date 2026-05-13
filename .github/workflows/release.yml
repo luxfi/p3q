@@ -1,0 +1,87 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt + clippy + test + lint_forbidden
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy (deny warnings)
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: cargo test (workspace, release)
+        run: cargo test --workspace --release
+
+      - name: lint_forbidden.sh
+        run: bash scripts/lint_forbidden.sh
+
+  docs:
+    name: cargo doc
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo doc (workspace, no deps)
+        run: cargo doc --workspace --no-deps
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: p3q-rustdoc-${{ github.ref_name }}
+          path: target/doc
+
+  release:
+    name: GitHub Release
+    needs: [check, docs]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+      # NOTE: `cargo publish` to crates.io is INTENTIONALLY OMITTED.
+      # P3Q is audit-gated (verifier not yet audited). Enable publishing
+      # only after audit sign-off by adding a `cargo publish` step here.

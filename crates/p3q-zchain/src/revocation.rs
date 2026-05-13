@@ -8,7 +8,7 @@ use p3q_core::Result;
 use p3q_field::Goldilocks;
 use p3q_stark::Air;
 
-use crate::{Epoch, ValidatorId, not_yet_audit_gated};
+use crate::{not_yet_audit_gated, Epoch, ValidatorId};
 
 /// Public input + witness for the `revoke_identity_key` circuit.
 #[derive(Debug, Clone)]

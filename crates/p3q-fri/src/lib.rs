@@ -77,12 +77,7 @@ pub trait FriProver<F: Field> {
 /// FRI verifier trait. Verifier paths MUST be panic-free.
 pub trait FriVerifier<F: Field> {
     /// Verify a FRI proof for the given codeword commitment root.
-    fn verify(
-        &self,
-        commit_root: &[u8; 32],
-        proof: &FriProof,
-        params: &FriParams,
-    ) -> Result<()>;
+    fn verify(&self, commit_root: &[u8; 32], proof: &FriProof, params: &FriParams) -> Result<()>;
 }
 
 #[cfg(test)]
@@ -91,7 +86,9 @@ mod tests {
 
     #[test]
     fn default_params_validate() {
-        FriParams::DEFAULT.validate().expect("default must validate");
+        FriParams::DEFAULT
+            .validate()
+            .expect("default must validate");
     }
 
     #[test]
