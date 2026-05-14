@@ -2,3 +2,9 @@
 **/target
 *.bak
 .DS_Store
+
+# Foundry build artifacts. Solidity moved to luxfi/p3q-evm (commit
+# 2f89121); this tree only sees cache/out if someone runs `forge build`
+# against the residual contracts/ directory.
+contracts/cache/
+contracts/out/
