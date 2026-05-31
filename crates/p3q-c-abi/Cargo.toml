@@ -1,0 +1,31 @@
+[package]
+name        = "p3q-c-abi"
+description = "C ABI shim for the P3Q strict-PQ verifier. Exposes `p3q_verify` to non-Rust callers (luxcpp, multichain-cpp, cevm precompiles)."
+version.workspace      = true
+authors.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+rust-version.workspace = true
+keywords    = ["zk", "stark", "ffi", "c-abi", "post-quantum"]
+categories  = ["cryptography", "external-ffi-bindings"]
+
+[lib]
+name       = "p3q_c_abi"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+p3q-core     = { workspace = true }
+p3q-verifier = { workspace = true }
+
+[build-dependencies]
+cbindgen = "0.27"
+
+# The C ABI shim is the ONE place in the workspace where `unsafe` is
+# unavoidable: every `extern "C" fn` receives raw `*const u8` pointers
+# that must be reconstituted into `&[u8]`. Each unsafe block is paired
+# with an explicit panic-catching boundary so a Rust panic NEVER
+# crosses the FFI boundary.
+[lints.rust]
+unsafe_code = "allow"
