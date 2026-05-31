@@ -10,6 +10,7 @@ members = [
     "crates/p3q-challenger",
     "crates/p3q-verifier",
     "crates/p3q-sha3",
+    "crates/p3q-gpu-sha3",
     "crates/p3q-zchain",
     "crates/p3q-c-abi",
 ]
@@ -37,6 +38,7 @@ p3q-recursion   = { version = "0.0.1", path = "crates/p3q-recursion" }
 p3q-challenger  = { version = "0.0.1", path = "crates/p3q-challenger" }
 p3q-verifier    = { version = "0.0.1", path = "crates/p3q-verifier" }
 p3q-sha3        = { version = "0.0.1", path = "crates/p3q-sha3" }
+p3q-gpu-sha3    = { version = "0.0.1", path = "crates/p3q-gpu-sha3" }
 p3q-zchain      = { version = "0.0.1", path = "crates/p3q-zchain" }
 p3q-c-abi       = { version = "0.0.1", path = "crates/p3q-c-abi" }
 

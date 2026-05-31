@@ -35,7 +35,8 @@ transforms. Same hash family as ML-DSA-65 (FIPS 204) and Pulsar-M
 
 | SHA | Tag | Impact |
 |-----|-----|--------|
-| (this) | (untagged) | Audit-grade generic STARK / FRI verifier body in `p3q-verifier`: wire format v1, cSHAKE256 Fiat-Shamir transcript with profile-keyed root, dual-auth-path Merkle openings, binary FRI fold; toy prover behind `feature="prover"`; golden vectors persisted in `vectors/`; verify wall-clock ~1 ms toy AIR; `cargo test`/`cargo clippy --all-targets -- -D warnings` clean |
+| (this) | (untagged) | **`Sha3Backend` trait + libluxgpu 0.4 FFI**. New crate `p3q-gpu-sha3` (the ONLY `unsafe`-allowed crate alongside `p3q-c-abi`) dlopens libluxgpu.{dylib,so} and exposes `lux_gpu_sha3_256_batch` / `lux_gpu_shake256_batch` via a `GpuShake: Sha3Backend` impl. Trait lives in `p3q-sha3::backend`; `CpuShake` is the audited reference. KAT parity (FIPS 202) enforced by `p3q-gpu-sha3` tests on every CI run. `p3q-merkle::verify_proof_batch(backend, root, openings)` fans out per-query Merkle authentications level-by-level; verifier collects every opening across every query and dispatches one `verify_proof_batch` per Merkle root (trace + each FRI layer). Wired into `verify_parsed` behind `p3q-verifier --features gpu-sha3`; transparent CPU fallback when dlopen fails, GPU context creation fails, libluxgpu lacks symbols, or libluxgpu panics inside FFI (`catch_unwind` boundary). Field-order load-bearing in `GpuShake`: `gpu` MUST drop before `lib` to avoid use-after-free on the destroy fn-ptr at shutdown. Audited transcript binding UNCHANGED — `GpuShake::cshake256_batch` routes through CPU because libluxgpu 0.4 has SHAKE256 (0x1F domain) only, not cSHAKE256 (0x04 domain), and cSHAKE outputs are not byte-equivalent to SHAKE outputs with prepended framing. When libluxgpu adds a cSHAKE batch primitive, the override drops in `p3q-gpu-sha3` with zero verifier-side change. Bench: toy-AIR `verifier_wall_clock` 1017 us/iter CPU-only vs 1016 us/iter `--features gpu-sha3` (within noise; GPU only meaningfully accelerates once cSHAKE batch lands). |
+| `c68eeaa` | (untagged) | Audit-grade generic STARK / FRI verifier body in `p3q-verifier`: wire format v1, cSHAKE256 Fiat-Shamir transcript with profile-keyed root, dual-auth-path Merkle openings, binary FRI fold; toy prover behind `feature="prover"`; golden vectors persisted in `vectors/`; verify wall-clock ~1 ms toy AIR; `cargo test`/`cargo clippy --all-targets -- -D warnings` clean |
 | `82d0b5f` | v0.0.1 | Populate strict-PQ Plonky3 fork workspace; 10 crates published on crates.io |
 
 ## Active versions
@@ -51,11 +52,17 @@ crates/
   p3q-core/         protocol types, error model, common traits
   p3q-field/        Goldilocks field arithmetic
   p3q-fri/          FRI low-degree test (cSHAKE256 Merkle)
-  p3q-merkle/       hash-based authenticated trees
+  p3q-merkle/       hash-based authenticated trees + verify_proof_batch
   p3q-stark/        AIR / STARK arithmetisation
   p3q-recursion/    P3Q-native recursion (no curve wrappers)
   p3q-challenger/   Fiat-Shamir transform under cSHAKE256
+  p3q-sha3/         FIPS 202 / SP 800-185 primitives + Sha3Backend trait
+                    + cshake256/tuple/kmac batch fns (CPU streaming impl)
+  p3q-gpu-sha3/     libluxgpu 0.4 SHA3-256 / SHAKE256 FFI (dlopen),
+                    GpuShake: Sha3Backend impl, transparent CPU fallback.
+                    THE second `unsafe`-allowed crate (with p3q-c-abi).
   p3q-zchain/       Lux Z-Chain integration
+  p3q-c-abi/        C ABI shim for non-Rust callers
 ```
 
 ## Cross-repo dependencies
@@ -73,6 +80,11 @@ crates/
 - Workspace manifest: `Cargo.toml`
 - Goldilocks field: `crates/p3q-field/`
 - cSHAKE256 Fiat-Shamir transcript: `crates/p3q-challenger/`
+- `Sha3Backend` trait + CPU impl: `crates/p3q-sha3/src/backend.rs`
+- Batched cshake/tuple/kmac fns: `crates/p3q-sha3/src/batch.rs`
+- libluxgpu FFI + `GpuShake`: `crates/p3q-gpu-sha3/src/lib.rs`
+- Batched Merkle verify: `crates/p3q-merkle/src/lib.rs::verify_proof_batch`
+- Verifier backend dispatch: `crates/p3q-verifier/src/verify.rs::select_backend`
 - Z-Chain integration crate: `crates/p3q-zchain/`
 - Vectors: `vectors/`
 
@@ -100,6 +112,11 @@ crates/
 - crates.io patch-bumps only (`v0.0.1` → `v0.0.2`); 10 published crates
   must move in lockstep. Verifier body landing supports a minor bump
   to v0.1.0.
+- GPU cSHAKE256 batch in libluxgpu: when libluxgpu adds a native
+  `lux_gpu_cshake256_batch` (0x04 padding domain, per-input
+  customisation string), override `GpuShake::cshake256_batch` to
+  dispatch through it. The verifier wiring is already in place — only
+  the `p3q-gpu-sha3` impl changes.
 
 ## Rules
 

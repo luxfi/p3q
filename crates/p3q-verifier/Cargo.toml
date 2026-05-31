@@ -20,6 +20,11 @@ p3q-sha3       = { workspace = true }
 p3q-stark      = { workspace = true }
 p3q-recursion  = { workspace = true }
 p3q-challenger = { workspace = true }
+# Optional GPU SHA3/SHAKE256 backend (libluxgpu 0.4 dlopen). Falls back
+# to the CPU reference whenever the dylib isn't present or lacks the
+# required symbols. NEVER changes verifier outputs — byte-identical to
+# the audited CPU path by `Sha3Backend` contract.
+p3q-gpu-sha3   = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -27,6 +32,10 @@ default = []
 # prover compiles ONLY under `cargo test` or with `--features prover`;
 # the audited production verifier path does not pull in any of this code.
 prover  = []
+# Wire libluxgpu's SHA3-256 / SHAKE256 batch primitives into the
+# per-query Merkle path verifications. Compile-time opt-in only;
+# audited build stays CPU-only.
+gpu-sha3 = ["dep:p3q-gpu-sha3"]
 
 [lints]
 workspace = true

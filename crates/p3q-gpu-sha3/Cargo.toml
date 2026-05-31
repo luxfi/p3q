@@ -1,0 +1,27 @@
+[package]
+name            = "p3q-gpu-sha3"
+description     = "P3Q SHA3-256 / SHAKE256 GPU backend (libluxgpu 0.4 FFI). Optional plug-in for p3q-sha3 when --features gpu-sha3 is enabled."
+version.workspace      = true
+authors.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+rust-version.workspace = true
+keywords        = ["sha3", "shake256", "gpu", "ffi", "post-quantum"]
+categories      = ["cryptography", "external-ffi-bindings"]
+
+[dependencies]
+p3q-sha3 = { workspace = true }
+# dlopen-based FFI: the libluxgpu.dylib / .so is loaded at runtime, not
+# linked at build time, so that p3q binaries stay portable across hosts
+# that may or may not have the GPU library installed.
+libloading = "0.8"
+
+# This crate is the ONE place in the workspace where `unsafe` is
+# unavoidable: dlsym'd C entry points return `*mut LuxGPU` opaque
+# pointers and consume raw `*const u8` buffers. Every unsafe block is
+# paired with a `catch_unwind` boundary so a libluxgpu panic NEVER
+# crosses the FFI seam back into the audited verifier.
+[lints.rust]
+unsafe_code = "allow"
