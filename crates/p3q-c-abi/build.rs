@@ -20,19 +20,19 @@ fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=cbindgen.toml");
 
-    let crate_dir = env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR not set");
-    let out = PathBuf::from(&crate_dir).join("include").join("lux").join("p3q.h");
+    let crate_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
+    let out = PathBuf::from(&crate_dir)
+        .join("include")
+        .join("lux")
+        .join("p3q.h");
 
     if let Err(e) = std::fs::create_dir_all(out.parent().unwrap()) {
         eprintln!("p3q-c-abi: could not create include dir: {e}");
         return;
     }
 
-    let config = cbindgen::Config::from_file(
-        PathBuf::from(&crate_dir).join("cbindgen.toml"),
-    )
-    .unwrap_or_default();
+    let config = cbindgen::Config::from_file(PathBuf::from(&crate_dir).join("cbindgen.toml"))
+        .unwrap_or_default();
 
     match cbindgen::Builder::new()
         .with_crate(&crate_dir)

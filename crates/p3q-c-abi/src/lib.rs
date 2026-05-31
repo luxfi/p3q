@@ -195,23 +195,22 @@ mod tests {
     }
 
     #[test]
-    fn sha3_profile_hits_audit_gate_stub() {
-        // Profile byte 0x10 + a single body byte exercises the SHA-3
-        // verifier path. Until the audited body lands in v0.1.0 this
-        // returns StarkVerification ("not yet audit-gated"), which the
-        // shim maps to P3Q_ERR_STARK. This is the contract: the FFI
-        // works today; the verifier itself becomes real on the next
-        // upstream release without any C ABI churn.
+    fn sha3_profile_with_short_body_is_parse_error() {
+        // Profile byte 0x10 followed by a single body byte is too
+        // short to contain even the wire-format header; the verifier
+        // rejects it at parse time with `InvalidLength` ->
+        // `P3Q_ERR_PARSE`. This exercises the SHA-3 dispatch path
+        // without needing to construct a valid proof from C.
         let proof = [0x10u8, 0x01];
         let rc = unsafe { p3q_verify(std::ptr::null(), 0, proof.as_ptr(), proof.len()) };
-        assert_eq!(rc, P3Q_ERR_STARK, "got {rc}");
+        assert_eq!(rc, P3Q_ERR_PARSE, "got {rc}");
     }
 
     #[test]
-    fn keccak_profile_hits_audit_gate_stub() {
+    fn keccak_profile_with_short_body_is_parse_error() {
         let proof = [0x11u8, 0x01];
         let rc = unsafe { p3q_verify(std::ptr::null(), 0, proof.as_ptr(), proof.len()) };
-        assert_eq!(rc, P3Q_ERR_STARK, "got {rc}");
+        assert_eq!(rc, P3Q_ERR_PARSE, "got {rc}");
     }
 
     #[test]

@@ -1,9 +1,9 @@
 # P3Q -- Agent Knowledge Base
 
 **Repository**: github.com/luxfi/p3q
-**Latest Tag**: v0.0.1
+**Latest Tag**: v0.0.1 (next: v0.1.0 with real verifier body)
 **crates.io**: 10 crates published
-**Status**: Under construction (workspace scaffolded; cSHAKE256 substitution + Z-Chain integration in flight)
+**Status**: Generic STARK / FRI verifier body LANDED in p3q-verifier; toy-AIR golden vector verifies under both SHA3 and Keccak profiles; AIR-specific Z-Chain circuit verifiers still scaffolded
 
 ## Purpose (one-liner)
 
@@ -35,6 +35,7 @@ transforms. Same hash family as ML-DSA-65 (FIPS 204) and Pulsar-M
 
 | SHA | Tag | Impact |
 |-----|-----|--------|
+| (this) | (untagged) | Audit-grade generic STARK / FRI verifier body in `p3q-verifier`: wire format v1, cSHAKE256 Fiat-Shamir transcript with profile-keyed root, dual-auth-path Merkle openings, binary FRI fold; toy prover behind `feature="prover"`; golden vectors persisted in `vectors/`; verify wall-clock ~1 ms toy AIR; `cargo test`/`cargo clippy --all-targets -- -D warnings` clean |
 | `82d0b5f` | v0.0.1 | Populate strict-PQ Plonky3 fork workspace; 10 crates published on crates.io |
 
 ## Active versions
@@ -77,12 +78,28 @@ crates/
 
 ## Open follow-ups
 
-- cSHAKE256 Merkle / Fiat-Shamir substitution: in flight.
+- cSHAKE256 Merkle / Fiat-Shamir substitution: LANDED in `p3q-verifier`
+  (transcript root labels `LUX-P3Q-V1-SHA3` / `LUX-P3Q-V1-KECCAK`,
+  per-observation tags `LUX-P3Q-V1-{HEADER,PUBLIC-INPUT,TRACE-COMMIT,
+  FRI-COMMIT,FRI-FINAL,FRI-QUERY}`).
+- AIR-specific verifiers (boundary + transition constraint checks):
+  pending. `p3q-zchain` circuit scaffolding still returns
+  `Circuit("... audit-gated")`; circuits land in v0.2.x by wrapping
+  the generic kernel.
+- Bit-reverse leaf permutation (v2): would collapse the per-query
+  dual auth paths into single paths. Current v1 wire ships two paths
+  per layer pair for simplicity at ~2x byte cost; still ~30 KB for the
+  toy AIR which is fine.
+- Constant-time annotation review: kernel uses only Goldilocks ops and
+  cSHAKE256 (both CT by construction). Branch on echoed query-index
+  mismatch is a public-time decision (transcript-derived comparison),
+  acceptable.
 - Z-Chain `ProofBackendID` byte assignment: pending workspace
   completion; will land in `luxfi/consensus/config/security_profile.go`
   registry once P3Q tags a release.
 - crates.io patch-bumps only (`v0.0.1` → `v0.0.2`); 10 published crates
-  must move in lockstep.
+  must move in lockstep. Verifier body landing supports a minor bump
+  to v0.1.0.
 
 ## Rules
 

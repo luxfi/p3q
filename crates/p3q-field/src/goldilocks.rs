@@ -38,6 +38,45 @@ impl Goldilocks {
         self.0
     }
 
+    /// Exponentiate by a `u64` exponent using right-to-left square-and-multiply.
+    ///
+    /// The exponent is **public** (transcript-derived, not a secret), so the
+    /// branch on the low bit is acceptable. For secret-key exponents use a
+    /// constant-time ladder instead.
+    pub fn pow(&self, mut exp: u64) -> Self {
+        let mut base = *self;
+        let mut acc = Self::one();
+        while exp > 0 {
+            if exp & 1 == 1 {
+                acc = acc * base;
+            }
+            base = base.square();
+            exp >>= 1;
+        }
+        acc
+    }
+
+    /// A primitive `2^bits`-th root of unity. Returns `None` for
+    /// `bits > 32` (Goldilocks has 2-adicity exactly 32).
+    ///
+    /// Strategy: the multiplicative group has order `p - 1 = 2^32 * (2^32 - 1)`,
+    /// so `g^((p - 1) / 2^bits)` is a primitive `2^bits`-th root of unity
+    /// when `g` generates the group. Goldilocks uses `g = 7` as its
+    /// canonical generator (the smallest positive integer that is not a
+    /// quadratic residue mod p and has full multiplicative order).
+    pub fn two_adic_generator(bits: u32) -> Option<Self> {
+        if bits == 0 {
+            return Some(Self::one());
+        }
+        if bits > 32 {
+            return None;
+        }
+        // (p - 1) / 2^bits, computed without overflow.
+        // p - 1 = 0xFFFF_FFFF_0000_0000.
+        let exp = 0xFFFF_FFFF_0000_0000u64 >> bits;
+        Some(Self::from_u64(7).pow(exp))
+    }
+
     /// Reduce a 128-bit value modulo `P` using the Goldilocks identity
     /// `2^64 ≡ 2^32 - 1 = EPSILON (mod P)`.
     ///
@@ -273,6 +312,51 @@ mod tests {
                 "reduce_u128({x:#034x}) = {got:#018x} but expected {want:#018x}"
             );
         }
+    }
+
+    #[test]
+    fn pow_zero_and_one() {
+        let a = Goldilocks::from_u64(42);
+        assert_eq!(a.pow(0), Goldilocks::one());
+        assert_eq!(a.pow(1), a);
+    }
+
+    #[test]
+    fn pow_consistency_with_inverse() {
+        // a^(p-2) == a^-1 for nonzero a.
+        let a = Goldilocks::from_u64(0xCAFE_BABE);
+        let want = a.inverse().unwrap();
+        let got = a.pow(P - 2);
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn seven_is_qnr_so_valid_generator() {
+        // For 7 to give primitive 2^k-th roots of unity, 7 must be a
+        // quadratic non-residue: 7^((p-1)/2) == p - 1 (== -1 mod p).
+        let exp = (P - 1) / 2; // (2^64 - 2^32) / 2 = 2^63 - 2^31
+        let r = Goldilocks::from_u64(7).pow(exp);
+        assert_eq!(r, Goldilocks::from_u64(P - 1));
+    }
+
+    #[test]
+    fn two_adic_generator_orders() {
+        // omega_1 should be -1
+        let w1 = Goldilocks::two_adic_generator(1).unwrap();
+        assert_eq!(w1, Goldilocks::from_u64(P - 1));
+        // omega_2 should be a primitive 4th root: w2^4 = 1, w2^2 = -1
+        let w2 = Goldilocks::two_adic_generator(2).unwrap();
+        assert_eq!(w2.pow(4), Goldilocks::one());
+        assert_eq!(w2.pow(2), Goldilocks::from_u64(P - 1));
+        // omega_32 should be primitive 2^32-th root: w^(2^32) == 1 and w^(2^31) == -1
+        let w32 = Goldilocks::two_adic_generator(32).unwrap();
+        assert_eq!(w32.pow(1u64 << 32), Goldilocks::one());
+        assert_eq!(w32.pow(1u64 << 31), Goldilocks::from_u64(P - 1));
+    }
+
+    #[test]
+    fn two_adic_generator_too_large() {
+        assert!(Goldilocks::two_adic_generator(33).is_none());
     }
 
     #[test]

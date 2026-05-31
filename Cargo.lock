@@ -402,6 +402,7 @@ dependencies = [
 name = "p3q-verifier"
 version = "0.0.1"
 dependencies = [
+ "p3q-challenger",
  "p3q-core",
  "p3q-field",
  "p3q-fri",

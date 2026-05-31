@@ -19,6 +19,14 @@ p3q-merkle     = { workspace = true }
 p3q-sha3       = { workspace = true }
 p3q-stark      = { workspace = true }
 p3q-recursion  = { workspace = true }
+p3q-challenger = { workspace = true }
+
+[features]
+default = []
+# Enable the toy prover (used by the in-crate golden vector tests). The
+# prover compiles ONLY under `cargo test` or with `--features prover`;
+# the audited production verifier path does not pull in any of this code.
+prover  = []
 
 [lints]
 workspace = true
