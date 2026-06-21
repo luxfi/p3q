@@ -18,5 +18,12 @@ p3q-fri        = { workspace = true }
 p3q-merkle     = { workspace = true }
 p3q-challenger = { workspace = true }
 
+[features]
+default = []
+# Enable the AIR DEEP-STARK prover. The prover compiles ONLY under
+# `cargo test` or with `--features prover`; the audited production
+# verifier path (`verify_air`) never pulls in any proving codepaths.
+prover = []
+
 [lints]
 workspace = true

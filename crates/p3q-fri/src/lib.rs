@@ -6,6 +6,18 @@
 //! FRI commit-phase and query-phase trait surface. Concrete provers
 //! and verifiers live behind these traits so the audit team reviews
 //! one definition of "what FRI accepts".
+//!
+//! Two layers live here:
+//! - [`domain`] — the single definition of the FRI fold formula and the
+//!   multiplicative-subgroup LDE-domain math, shared by every consumer.
+//! - [`engine`] — a reusable single-codeword commit / prove / verify
+//!   FRI engine, used by the AIR DEEP-STARK in `p3q-stark`.
+//!
+//! The trait surface below ([`FriProver`] / [`FriVerifier`]) is the
+//! abstract contract; [`engine`] is the concrete strict-PQ realisation.
+
+pub mod domain;
+pub mod engine;
 
 use p3q_core::{P3qError, Result};
 use p3q_field::Field;

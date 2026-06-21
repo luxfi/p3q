@@ -5,8 +5,7 @@
 //! over (pubkey || epoch) and the Merkle insertion path.
 
 use p3q_core::Result;
-use p3q_field::Goldilocks;
-use p3q_stark::Air;
+use p3q_stark::{Air, AirBuilder};
 
 use crate::{not_yet_audit_gated, Epoch, ValidatorId};
 
@@ -41,7 +40,7 @@ impl RegisterValidator {
 #[derive(Debug, Clone, Copy)]
 pub struct RegisterValidatorAir;
 
-impl Air<Goldilocks> for RegisterValidatorAir {
+impl Air for RegisterValidatorAir {
     fn width(&self) -> usize {
         // 8 columns: pubkey words + signature accumulator + insertion lane.
         8
@@ -50,7 +49,17 @@ impl Air<Goldilocks> for RegisterValidatorAir {
         // Power of two; signature recurrence + Merkle path verification.
         1024
     }
+    fn num_public_inputs(&self) -> usize {
+        // Public-input field-element count is finalized with the AIR body.
+        0
+    }
     fn num_constraints(&self) -> usize {
         16
+    }
+    fn eval<AB: AirBuilder>(&self, _builder: &mut AB) {
+        // Audit-gated: the constraint system lands post-audit. `build_air`
+        // refuses construction until then; `eval` must never silently impose
+        // zero constraints (a fail-OPEN), so it fails loudly if reached.
+        unimplemented!("z-chain circuit AIR is audit-gated; see build_air");
     }
 }

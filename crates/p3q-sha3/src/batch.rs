@@ -60,10 +60,7 @@ pub struct TupleInput<'a> {
 /// [`Sha3Backend::tuple_hash256_batch`] — CPU streams items directly
 /// into the stateful hasher; future GPU backends may override with a
 /// native batch primitive.
-pub fn tuple_hash256_batch(
-    backend: &dyn Sha3Backend,
-    inputs: &[TupleInput<'_>],
-) -> Vec<Vec<u8>> {
+pub fn tuple_hash256_batch(backend: &dyn Sha3Backend, inputs: &[TupleInput<'_>]) -> Vec<Vec<u8>> {
     let customisations: Vec<&[u8]> = inputs.iter().map(|i| i.customisation).collect();
     let items: Vec<&[&[u8]]> = inputs.iter().map(|i| i.items).collect();
     let out_lens: Vec<usize> = inputs.iter().map(|i| i.out_len).collect();

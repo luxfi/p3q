@@ -210,8 +210,7 @@ fn try_open_with_symbols(path: &str) -> Option<LoadedLib> {
     let lib = unsafe { Library::new(path) }.ok()?;
     let create_sym: Symbol<LuxGpuCreate> = unsafe { lib.get(b"lux_gpu_create\0") }.ok()?;
     let destroy_sym: Symbol<LuxGpuDestroy> = unsafe { lib.get(b"lux_gpu_destroy\0") }.ok()?;
-    let bn_sym: Symbol<LuxGpuBackendName> =
-        unsafe { lib.get(b"lux_gpu_backend_name\0") }.ok()?;
+    let bn_sym: Symbol<LuxGpuBackendName> = unsafe { lib.get(b"lux_gpu_backend_name\0") }.ok()?;
     let sha3_sym: Symbol<LuxGpuSha3_256Batch> =
         unsafe { lib.get(b"lux_gpu_sha3_256_batch\0") }.ok()?;
     let shake_sym: Symbol<LuxGpuShake256Batch> =
@@ -436,7 +435,10 @@ mod tests {
         };
         let out = gpu.sha3_256_batch(&[b"", b"abc"]);
         assert_eq!(out[0], SHA3_256_EMPTY, "GPU SHA3-256('') diverged from KAT");
-        assert_eq!(out[1], SHA3_256_ABC, "GPU SHA3-256('abc') diverged from KAT");
+        assert_eq!(
+            out[1], SHA3_256_ABC,
+            "GPU SHA3-256('abc') diverged from KAT"
+        );
     }
 
     /// CPU and GPU must produce byte-identical SHAKE256 output across a
@@ -489,7 +491,8 @@ mod tests {
         let cpu_out = CpuShake.sha3_256_batch(inputs);
         for (i, (g, c)) in gpu_out.iter().zip(cpu_out.iter()).enumerate() {
             assert_eq!(
-                g, c,
+                g,
+                c,
                 "GPU vs CPU SHA3-256 diverged for input {i} (len {})",
                 inputs[i].len()
             );

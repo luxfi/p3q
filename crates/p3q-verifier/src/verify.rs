@@ -178,10 +178,7 @@ fn check_query_invariants(parsed: &ParsedProof) -> Result<()> {
 /// Authenticate every Merkle opening across every query in one
 /// `verify_proof_batch` call per root. Returns `Err(P3qError::MerkleAuth)`
 /// if any opening fails.
-fn authenticate_all_queries_batched(
-    backend: &dyn Sha3Backend,
-    parsed: &ParsedProof,
-) -> Result<()> {
+fn authenticate_all_queries_batched(backend: &dyn Sha3Backend, parsed: &ParsedProof) -> Result<()> {
     let log_lde = parsed.header.log_lde();
     let n_full = 1u32 << log_lde;
     let num_rounds = parsed.header.num_fri_rounds() as usize;
