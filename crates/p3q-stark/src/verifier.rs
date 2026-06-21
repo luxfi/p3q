@@ -35,12 +35,41 @@ use crate::transcript::StarkTranscript;
 /// Verify an AIR DEEP-STARK proof for `air` under `public_inputs`.
 pub fn verify_air<A: Air>(air: &A, proof: &AirProof, public_inputs: &[Goldilocks]) -> Result<()> {
     // ---- 0. Shape / sanity ----
+    //
+    // Validate the attacker-supplied shape parameters BEFORE any shift or
+    // arithmetic uses them (panic-free by contract). Bounds mirror the
+    // audited wire header (`p3q-verifier::wire::Header::decode`):
+    // `log_blowup ∈ 1..=5`, degree-bound-style `log_trace_rows ∈ 1..=20`,
+    // and the LDE log must fit a u32 shift (`< 32`) so `1u32 << log_lde`
+    // is well-defined. A trace needs ≥ 2 rows for a meaningful next-row
+    // transition, hence the `≥ 1` lower bound.
+    let log_n = proof.log_trace_rows;
+    let log_blowup = proof.log_blowup;
+    if !(1..=20).contains(&log_n) {
+        return Err(P3qError::StarkVerification(
+            "proof log_trace_rows out of range",
+        ));
+    }
+    if !(1..=5).contains(&log_blowup) {
+        return Err(P3qError::StarkVerification("proof log_blowup out of range"));
+    }
+    if log_n + log_blowup > 31 {
+        return Err(P3qError::StarkVerification(
+            "proof log_trace_rows + log_blowup exceeds LDE shift bound",
+        ));
+    }
+    // An AIR with no transition constraints certifies nothing — every
+    // trace would "satisfy" it (a proof of nothing). Fail closed.
+    if air.num_constraints() == 0 {
+        return Err(P3qError::StarkVerification(
+            "air declares zero constraints (a STARK with no constraints certifies nothing)",
+        ));
+    }
     if public_inputs.len() != air.num_public_inputs() {
         return Err(P3qError::StarkVerification(
             "public input count != air num_public_inputs",
         ));
     }
-    let log_n = proof.log_trace_rows;
     if (1usize << log_n) != air.num_rows() {
         return Err(P3qError::StarkVerification(
             "proof trace rows != air num_rows",
@@ -52,7 +81,6 @@ pub fn verify_air<A: Air>(air: &A, proof: &AirProof, public_inputs: &[Goldilocks
             "OOD trace vector width mismatch",
         ));
     }
-    let log_blowup = proof.log_blowup;
     let log_lde = log_n + log_blowup;
     let n_lde = 1u32 << log_lde;
     let blowup = 1u32 << log_blowup;

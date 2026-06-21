@@ -108,13 +108,50 @@ pub struct FriShape {
 }
 
 impl FriShape {
+    /// Reject any shape whose parameters would make the engine panic
+    /// (shift overflow, subtraction underflow) or be degenerate, BEFORE
+    /// any field/Merkle work. Both [`prove`] and [`verify`] call this
+    /// first so a downstream caller that supplies an arbitrary `FriShape`
+    /// (the engine trusts it by value) gets a typed error, never a panic.
+    ///
+    /// Invariants enforced:
+    /// - `log_lde = log_degree_bound + log_blowup` does not overflow `u32`
+    ///   and is `≤ 31` (so `1u32 << log_lde` and the domain generator are
+    ///   well-defined);
+    /// - `log_final_poly < log_lde` (so `num_rounds = log_lde −
+    ///   log_final_poly` neither underflows nor is zero, i.e. folding
+    ///   terminates strictly before the final layer);
+    /// - `num_queries ≥ 1` (a query-free proof checks nothing).
+    pub fn validate(&self) -> Result<()> {
+        let log_lde = self
+            .log_degree_bound
+            .checked_add(self.log_blowup)
+            .ok_or(P3qError::FriVerification("fri shape: log_lde overflow"))?;
+        if log_lde > 31 {
+            return Err(P3qError::FriVerification(
+                "fri shape: log_lde exceeds shift bound (>31)",
+            ));
+        }
+        if self.log_final_poly >= log_lde {
+            return Err(P3qError::FriVerification(
+                "fri shape: log_final_poly >= log_lde (no fold rounds)",
+            ));
+        }
+        if self.num_queries == 0 {
+            return Err(P3qError::FriVerification("fri shape: zero queries"));
+        }
+        Ok(())
+    }
+
     /// log2 of the LDE domain size.
     #[inline]
     pub fn log_lde(&self) -> u32 {
         self.log_degree_bound + self.log_blowup
     }
 
-    /// Total fold rounds (= number of opened layers).
+    /// Total fold rounds (= number of opened layers). Only well-defined
+    /// once [`validate`](FriShape::validate) has passed (`log_final_poly <
+    /// log_lde`); the engine calls `validate` before any `num_rounds` use.
     pub fn num_rounds(&self) -> usize {
         (self.log_lde() - self.log_final_poly) as usize
     }
@@ -150,6 +187,7 @@ pub fn prove(
     shape: FriShape,
     transcript: &mut dyn FriTranscript,
 ) -> Result<FriProofData> {
+    shape.validate()?;
     let n = codeword.len();
     if n != (1usize << shape.log_lde()) {
         return Err(P3qError::InvalidLength(
@@ -157,9 +195,6 @@ pub fn prove(
         ));
     }
     let num_rounds = shape.num_rounds();
-    if num_rounds == 0 {
-        return Err(P3qError::FriVerification("fri prove: zero rounds"));
-    }
 
     // Layer 0 = input codeword (already committed by caller).
     let mut layers: Vec<Vec<Goldilocks>> = Vec::with_capacity(num_rounds + 1);
@@ -278,10 +313,8 @@ pub fn verify(
     shape: FriShape,
     transcript: &mut dyn FriTranscript,
 ) -> Result<Vec<FriQueryEcho>> {
+    shape.validate()?;
     let num_rounds = shape.num_rounds();
-    if num_rounds == 0 {
-        return Err(P3qError::FriVerification("fri verify: zero rounds"));
-    }
     if proof.layer_roots.len() != num_rounds - 1 {
         return Err(P3qError::InvalidEncoding(
             "fri verify: layer root count mismatch",
@@ -652,5 +685,68 @@ mod tests {
         let mut vt = TestTranscript::new();
         vt.observe_fri_root(&root);
         assert!(verify(&proof, &root, shape, &mut vt).is_err());
+    }
+
+    // ---- Regression: F2 (adversarial FriShape panic) ----
+
+    /// The engine takes `FriShape` BY VALUE and trusts it. A downstream
+    /// caller (not the AIR layer, which derives a valid shape) could pass
+    /// an arbitrary shape. [`FriShape::validate`] must turn every
+    /// panic-inducing shape into a typed error:
+    /// - shift overflow: `log_degree_bound + log_blowup > 31` (or u32
+    ///   overflow);
+    /// - subtraction underflow in `num_rounds`: `log_final_poly >=
+    ///   log_lde`.
+    /// Neither `verify` nor `prove` may panic on any of them.
+    #[test]
+    fn f2_adversarial_shape_returns_typed_error_no_panic() {
+        // An honest proof to feed `verify`.
+        let good = make_shape(4, 3, 1);
+        let codeword = make_codeword(good);
+        let tree = commit_layer(&codeword).unwrap();
+        let root = tree.root();
+        let mut pt = TestTranscript::new();
+        pt.observe_fri_root(&root);
+        let proof = prove(&codeword, &tree, good, &mut pt).unwrap();
+
+        // (ldb, lbu, lfp): each row is a shape that previously panicked.
+        let bad_shapes = [
+            (33u32, 3u32, 1u32), // log_lde = 36 > 31 (shift overflow)
+            (40, 3, 1),          // log_lde = 43 > 31
+            (4, 40, 1),          // log_lde = 44 > 31
+            (32, 0, 1),          // log_lde = 32 > 31 (edge)
+            (4, 3, 99),          // log_final_poly 99 > log_lde 7 (underflow)
+            (u32::MAX, 1, 0),    // log_lde u32 add overflow
+        ];
+        for (ldb, lbu, lfp) in bad_shapes {
+            let bad = FriShape {
+                log_degree_bound: ldb,
+                log_blowup: lbu,
+                log_final_poly: lfp,
+                num_queries: 8,
+            };
+            // verify path
+            let mut vt = TestTranscript::new();
+            vt.observe_fri_root(&root);
+            let vres = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                verify(&proof, &root, bad, &mut vt)
+            }));
+            match vres {
+                Ok(Err(_)) => { /* typed rejection — correct */ }
+                Ok(Ok(_)) => panic!("verify ACCEPTED adversarial shape ({ldb},{lbu},{lfp})"),
+                Err(_) => panic!("verify PANICKED on shape ({ldb},{lbu},{lfp})"),
+            }
+            // prove path (validate runs first, before any allocation)
+            let mut ptb = TestTranscript::new();
+            ptb.observe_fri_root(&root);
+            let pres = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                prove(&codeword, &tree, bad, &mut ptb)
+            }));
+            match pres {
+                Ok(Err(_)) => { /* typed rejection — correct */ }
+                Ok(Ok(_)) => panic!("prove ACCEPTED adversarial shape ({ldb},{lbu},{lfp})"),
+                Err(_) => panic!("prove PANICKED on shape ({ldb},{lbu},{lfp})"),
+            }
+        }
     }
 }

@@ -5,7 +5,6 @@
 //! over (pubkey || epoch) and the Merkle insertion path.
 
 use p3q_core::Result;
-use p3q_stark::{Air, AirBuilder};
 
 use crate::{not_yet_audit_gated, Epoch, ValidatorId};
 
@@ -36,30 +35,11 @@ impl RegisterValidator {
     }
 }
 
-/// AIR for `register_validator`. Body lands post-audit-gate.
+/// AIR for `register_validator`. Typed placeholder only — it deliberately
+/// carries **no** [`Air`](p3q_stark::Air) implementation until the
+/// constraint system is written and audited, so it cannot be handed to
+/// `prove_air`/`verify_air` (which require `A: Air`). `build_air` returns
+/// the audit-gate error; this struct exists purely to name the eventual
+/// circuit in the cross-crate type surface.
 #[derive(Debug, Clone, Copy)]
 pub struct RegisterValidatorAir;
-
-impl Air for RegisterValidatorAir {
-    fn width(&self) -> usize {
-        // 8 columns: pubkey words + signature accumulator + insertion lane.
-        8
-    }
-    fn num_rows(&self) -> usize {
-        // Power of two; signature recurrence + Merkle path verification.
-        1024
-    }
-    fn num_public_inputs(&self) -> usize {
-        // Public-input field-element count is finalized with the AIR body.
-        0
-    }
-    fn num_constraints(&self) -> usize {
-        16
-    }
-    fn eval<AB: AirBuilder>(&self, _builder: &mut AB) {
-        // Audit-gated: the constraint system lands post-audit. `build_air`
-        // refuses construction until then; `eval` must never silently impose
-        // zero constraints (a fail-OPEN), so it fails loudly if reached.
-        unimplemented!("z-chain circuit AIR is audit-gated; see build_air");
-    }
-}

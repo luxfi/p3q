@@ -4,7 +4,6 @@
 //! commitment posted to Z-Chain and referenced by Q-Chain (HIP-0079).
 
 use p3q_core::Result;
-use p3q_stark::{Air, AirBuilder};
 
 use crate::{not_yet_audit_gated, Epoch};
 
@@ -33,29 +32,10 @@ impl ProduceEpochCommitment {
     }
 }
 
-/// AIR for `produce_epoch_commitment`. This is a recursion circuit;
-/// the body verifies each inner STARK proof inside its trace.
+/// AIR for `produce_epoch_commitment`. This will be a recursion circuit
+/// whose body verifies each inner STARK proof inside its trace. Typed
+/// placeholder only — no [`Air`](p3q_stark::Air) implementation until the
+/// constraint system is written and audited, so it cannot reach
+/// `prove_air`/`verify_air`. `build_air` returns the audit-gate error.
 #[derive(Debug, Clone, Copy)]
 pub struct ProduceEpochCommitmentAir;
-
-impl Air for ProduceEpochCommitmentAir {
-    fn width(&self) -> usize {
-        24
-    }
-    fn num_rows(&self) -> usize {
-        16384
-    }
-    fn num_public_inputs(&self) -> usize {
-        // Public-input field-element count is finalized with the AIR body.
-        0
-    }
-    fn num_constraints(&self) -> usize {
-        48
-    }
-    fn eval<AB: AirBuilder>(&self, _builder: &mut AB) {
-        // Audit-gated: the constraint system lands post-audit. `build_air`
-        // refuses construction until then; `eval` must never silently impose
-        // zero constraints (a fail-OPEN), so it fails loudly if reached.
-        unimplemented!("z-chain circuit AIR is audit-gated; see build_air");
-    }
-}

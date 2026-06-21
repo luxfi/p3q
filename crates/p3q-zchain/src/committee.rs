@@ -5,7 +5,6 @@
 //! for each selected validator.
 
 use p3q_core::Result;
-use p3q_stark::{Air, AirBuilder};
 
 use crate::{not_yet_audit_gated, Epoch};
 
@@ -33,28 +32,9 @@ impl SelectEpochCommittee {
     }
 }
 
-/// AIR for `select_epoch_committee`.
+/// AIR for `select_epoch_committee`. Typed placeholder only — no
+/// [`Air`](p3q_stark::Air) implementation until the constraint system is
+/// written and audited, so it cannot reach `prove_air`/`verify_air`.
+/// `build_air` returns the audit-gate error.
 #[derive(Debug, Clone, Copy)]
 pub struct SelectEpochCommitteeAir;
-
-impl Air for SelectEpochCommitteeAir {
-    fn width(&self) -> usize {
-        12
-    }
-    fn num_rows(&self) -> usize {
-        4096
-    }
-    fn num_public_inputs(&self) -> usize {
-        // Public-input field-element count is finalized with the AIR body.
-        0
-    }
-    fn num_constraints(&self) -> usize {
-        24
-    }
-    fn eval<AB: AirBuilder>(&self, _builder: &mut AB) {
-        // Audit-gated: the constraint system lands post-audit. `build_air`
-        // refuses construction until then; `eval` must never silently impose
-        // zero constraints (a fail-OPEN), so it fails loudly if reached.
-        unimplemented!("z-chain circuit AIR is audit-gated; see build_air");
-    }
-}

@@ -105,6 +105,13 @@ pub fn prove_air<A: Air>(air: &A, trace: &Trace, public_inputs: &[Goldilocks]) -
             "public input count != air num_public_inputs",
         ));
     }
+    // An AIR with no transition constraints certifies nothing; refuse to
+    // produce a "proof of nothing" (mirrors the verifier's gate).
+    if air.num_constraints() == 0 {
+        return Err(P3qError::StarkVerification(
+            "air declares zero constraints (a STARK with no constraints certifies nothing)",
+        ));
+    }
     let num_rows = trace.num_rows();
     let log_n = num_rows.trailing_zeros();
     // Blowup must be large enough that the quotient (degree up to
@@ -112,6 +119,19 @@ pub fn prove_air<A: Air>(air: &A, trace: &Trace, public_inputs: &[Goldilocks]) -
     // 2^log_blowup ≥ constraint_degree. Round up to a power of two.
     let log_blowup = pick_log_blowup(air.constraint_degree());
     let log_lde = log_n + log_blowup;
+    // Defensive shape bound (same invariant the verifier enforces): the
+    // LDE log must keep the `1 << log_lde` shift well-defined and the
+    // trace degree within the audited range, so no shift can overflow.
+    if !(1..=20).contains(&log_n) {
+        return Err(P3qError::StarkVerification(
+            "trace log_rows out of range (must be 1..=20)",
+        ));
+    }
+    if log_lde > 31 {
+        return Err(P3qError::StarkVerification(
+            "trace log_rows + log_blowup exceeds LDE shift bound",
+        ));
+    }
     let n_lde = 1usize << log_lde;
 
     let g_h = lde_generator(log_n)?; // trace-domain generator
@@ -472,6 +492,187 @@ mod tests {
         assert!(
             prove_air(&air, &trace, &[Goldilocks::one()]).is_err(),
             "prover rejects public-input count != num_public_inputs"
+        );
+    }
+
+    // ---- Regression: F4 (fail-open zero-constraint AIR) ----
+
+    /// An AIR that declares `num_constraints() == 0` and emits no
+    /// constraint certifies nothing — a "proof of nothing". Both the
+    /// prover and the verifier MUST refuse it with a typed error, never
+    /// produce/accept a proof for arbitrary junk.
+    struct NoConstraintAir;
+    impl Air for NoConstraintAir {
+        fn width(&self) -> usize {
+            1
+        }
+        fn num_rows(&self) -> usize {
+            8
+        }
+        fn num_public_inputs(&self) -> usize {
+            0
+        }
+        fn num_constraints(&self) -> usize {
+            0
+        }
+        fn constraint_degree(&self) -> usize {
+            1
+        }
+        fn eval<AB: AirBuilder>(&self, _b: &mut AB) {}
+    }
+
+    #[test]
+    fn f4_zero_constraint_air_is_refused_by_prover() {
+        let air = NoConstraintAir;
+        // Arbitrary junk trace; a zero-constraint AIR would otherwise
+        // "prove" it.
+        let col: Vec<Goldilocks> = (0..8)
+            .map(|i| Goldilocks::from_u64(0xDEAD_0000 + i))
+            .collect();
+        let trace = Trace::new(vec![col]).expect("trace");
+        assert!(
+            prove_air(&air, &trace, &[]).is_err(),
+            "prover MUST refuse a zero-constraint AIR (proof of nothing)"
+        );
+    }
+
+    #[test]
+    fn f4_zero_constraint_air_is_refused_by_verifier() {
+        // The verifier must reject independently of the prover: even a
+        // proof object that somehow reached it cannot certify a
+        // zero-constraint AIR. We borrow a well-formed proof from a
+        // 1-constraint AIR and present it against the zero-constraint AIR
+        // — the verifier rejects on the constraint-count gate, panic-free.
+        let real = ConstantColumnAir;
+        let col = vec![Goldilocks::from_u64(7); 8];
+        let trace = Trace::new(vec![col]).expect("trace");
+        let proof = prove_air(&real, &trace, &[]).expect("prove a real AIR");
+        let zero = NoConstraintAir;
+        assert!(
+            verify_air(&zero, &proof, &[]).is_err(),
+            "verifier MUST reject against a zero-constraint AIR"
+        );
+    }
+
+    // ---- Regression: F1 (remote-DoS via out-of-range shape) ----
+
+    /// `log_blowup` and `log_trace_rows` are attacker-controlled fields of
+    /// the proof. The verifier derives `log_lde = log_n + log_blowup` and
+    /// shifts by it; an out-of-range value must yield a typed error BEFORE
+    /// any shift, never a panic (the file is panic-free by contract).
+    #[test]
+    fn f1_oversized_log_blowup_returns_typed_error_no_panic() {
+        let air = ConstantColumnAir;
+        let col = vec![Goldilocks::from_u64(7); 8];
+        let trace = Trace::new(vec![col]).expect("trace");
+        let proof = prove_air(&air, &trace, &[]).expect("prove");
+        // Values straddling and far beyond the u32 shift edge (log_lde ==
+        // 32) — every one must REJECT and none may panic or accept.
+        for bad in [
+            6u32,
+            25,
+            28,
+            29,
+            30,
+            31,
+            40,
+            60,
+            64,
+            100,
+            u32::MAX - 2,
+            u32::MAX,
+        ] {
+            let mut p = proof.clone();
+            p.log_blowup = bad;
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                verify_air(&air, &p, &[])
+            }));
+            match res {
+                Ok(Ok(())) => panic!("oversized log_blowup={bad} was ACCEPTED"),
+                Ok(Err(_)) => { /* typed rejection — correct */ }
+                Err(_) => panic!("verifier PANICKED on log_blowup={bad} (DoS)"),
+            }
+        }
+    }
+
+    #[test]
+    fn f1_oversized_log_trace_rows_returns_typed_error_no_panic() {
+        let air = ConstantColumnAir;
+        let col = vec![Goldilocks::from_u64(7); 8];
+        let trace = Trace::new(vec![col]).expect("trace");
+        let proof = prove_air(&air, &trace, &[]).expect("prove");
+        for bad in [0u32, 1, 2, 5, 21, 31, 40, 63, 64, u32::MAX] {
+            let mut p = proof.clone();
+            p.log_trace_rows = bad;
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                verify_air(&air, &p, &[])
+            }));
+            match res {
+                Ok(v) => assert!(v.is_err(), "wrong log_trace_rows={bad} must reject"),
+                Err(_) => panic!("verifier PANICKED on log_trace_rows={bad} (panic-free VIOLATED)"),
+            }
+        }
+    }
+
+    // ---- Regression: F3 (cyclic-transition contract) ----
+
+    /// A *terminating* counter `next == local + 1` over rows `0,1,…,7`.
+    /// The wrap-around pair (row 7 → row 0) gives `0 != 8`, so `C` does
+    /// not vanish on all of `H`. The air.rs `eval` contract states every
+    /// constraint must hold on the cyclic wrap-around too (there is no
+    /// last-row mask), so this MUST be rejected — documenting that a
+    /// non-cyclic recurrence cannot be written as a bare transition
+    /// constraint.
+    struct TerminatingCounterAir;
+    impl Air for TerminatingCounterAir {
+        fn width(&self) -> usize {
+            1
+        }
+        fn num_rows(&self) -> usize {
+            8
+        }
+        fn num_public_inputs(&self) -> usize {
+            0
+        }
+        fn num_constraints(&self) -> usize {
+            1
+        }
+        fn constraint_degree(&self) -> usize {
+            1
+        }
+        fn eval<AB: AirBuilder>(&self, b: &mut AB) {
+            let one = b.constant(Goldilocks::one());
+            let next = b.next(0);
+            let local = b.local(0);
+            b.assert_eq(next, local + one);
+        }
+    }
+
+    #[test]
+    fn f3_cyclic_valid_air_proves_and_verifies() {
+        // The constant column `next == local` holds on EVERY row including
+        // the wrap-around — a genuinely cyclic transition. It must verify.
+        let air = ConstantColumnAir;
+        let col = vec![Goldilocks::from_u64(7); 8];
+        let trace = Trace::new(vec![col]).expect("trace");
+        let proof = prove_air(&air, &trace, &[]).expect("prove cyclic-valid trace");
+        verify_air(&air, &proof, &[]).expect("verifier accepts a cyclic-valid trace");
+    }
+
+    #[test]
+    fn f3_terminating_counter_is_rejected() {
+        // The contract has NO last-row selector: the doc-following
+        // terminating counter 0..7 must NOT prove+verify.
+        let air = TerminatingCounterAir;
+        let col: Vec<Goldilocks> = (0..8).map(Goldilocks::from_u64).collect();
+        let trace = Trace::new(vec![col]).expect("trace");
+        let accepted = match prove_air(&air, &trace, &[]) {
+            Ok(p) => verify_air(&air, &p, &[]).is_ok(),
+            Err(_) => false, // prover refused — also fail-closed
+        };
+        assert!(
+            !accepted,
+            "a terminating (non-cyclic) transition must be rejected (no last-row mask)"
         );
     }
 }

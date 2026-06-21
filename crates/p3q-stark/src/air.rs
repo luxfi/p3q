@@ -56,9 +56,13 @@ pub trait AirBuilder {
     /// Current-row cell at column `col`.
     fn local(&self, col: usize) -> Self::Expr;
 
-    /// Next-row cell at column `col`. On the LDE this is the value one
-    /// trace-domain step ahead (i.e. `T(g · x)`), with wraparound
-    /// handled by the prover's domain construction.
+    /// Next-row cell at column `col`. On the trace domain `H` this is the
+    /// value one trace-domain step ahead (i.e. `T(g · x)`). The step is
+    /// **cyclic**: the `next` of the last row (index `num_rows − 1`) is
+    /// the *first* row (index `0`), because `g^{num_rows} = 1`. A
+    /// constraint relating `local` and `next` is therefore evaluated on
+    /// the wrap-around pair `(row n−1, row 0)` exactly like every other
+    /// row — see [`Air::eval`] for the contract this imposes.
     fn next(&self, col: usize) -> Self::Expr;
 
     /// Public input at index `idx` (matches [`Air::num_public_inputs`]).
@@ -66,18 +70,6 @@ pub trait AirBuilder {
 
     /// Lift a field constant into the expression type.
     fn constant(&self, c: Goldilocks) -> Self::Expr;
-
-    /// Whether this row participates in the *transition* (every-row)
-    /// constraint set. The prover/verifier already gate transition
-    /// constraints by multiplying with the boundary-vanishing factor, so
-    /// `eval` should emit transition constraints unconditionally and let
-    /// the glue handle the "all rows except the last" masking. This flag
-    /// is provided for builders that want to specialise the last row
-    /// (e.g. cyclic vs terminating traces); the default builders return
-    /// `true`.
-    fn is_transition(&self) -> bool {
-        true
-    }
 
     /// Assert that `expr` is zero on every row where the constraint
     /// applies. The builder *accumulates* these into its constraint
@@ -141,6 +133,26 @@ pub trait Air: Send + Sync {
     /// verifier. The body must be *pure*: deterministic in `builder`'s
     /// row/public-input accessors, with no interior mutability or side
     /// effects beyond `assert_zero` / `assert_eq`.
+    ///
+    /// **Cyclic contract — read this before writing a recurrence.** Every
+    /// constraint emitted here MUST hold on *all* rows of the trace
+    /// domain `H`, **including the cyclic wrap-around row**: the prover
+    /// divides the combined constraint polynomial by the full vanishing
+    /// polynomial `Z_H(x) = x^{num_rows} − 1`, which vanishes on *every*
+    /// row of `H`. There is **no last-row selector** and no "all rows
+    /// except the last" masking — the `next` of the last row is the first
+    /// row (`g^{num_rows} = 1`; see [`AirBuilder::next`]), and a
+    /// transition constraint is checked on that `(row n−1, row 0)` pair
+    /// too. Consequently a *terminating* (non-cyclic) recurrence — e.g. a
+    /// counter `next == local + 1` whose last value does not wrap back to
+    /// the first — MUST NOT be written as a bare transition constraint:
+    /// it does not vanish on the wrap-around row, so `C / Z_H` is not a
+    /// polynomial and FRI rejects the proof (completeness loss, not a
+    /// soundness hole). Express a terminating computation by making the
+    /// trace genuinely cyclic (pad/wrap the columns so the recurrence
+    /// closes) or by pinning its endpoints with
+    /// [`boundary_constraints`](Air::boundary_constraints), never by
+    /// assuming a phantom last-row exemption.
     ///
     /// Boundary constraints (fixed values at specific rows) are NOT
     /// expressed here — they are exact-point checks the verifier runs
