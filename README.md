@@ -35,7 +35,14 @@ transforms. Same hash family as ML-DSA-65 (FIPS 204) and Pulsar
 - Verifier dispatch + profile byte handling (`p3q-verifier`):
   malformed input is rejected with a typed `P3qError`, never a panic.
 - `scripts/lint_forbidden.sh` CI gate against banned imports.
-- Test suite: 43 unit tests pass, zero failures.
+- Test suite: **123 tests pass, 0 failed** (1 intentionally `#[ignore]`d
+  golden-vector writer). Regression coverage for the verifier-hardening fixes
+  (F1–F4, F6) lives as `#[cfg(test)]` in `prover.rs` (`f1_*`, `f3_*`, `f4_*`)
+  and `engine.rs` (`f2_*`), plus the DEEP/OOD/Merkle tamper-rejection suite in
+  `p3q-verifier`. The DEEP-STARK soundness core was separately red-teamed
+  during hardening (15 forgery attempts, all rejected); those exploratory
+  harnesses were removed — the persistent regression coverage is the named
+  tests above, not a committed enumeration of the 15.
 
 ### What's WIP (returns `P3qError`, never panics)
 
