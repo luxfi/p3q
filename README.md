@@ -1,3 +1,5 @@
+<p align="center"><img src=".github/hero.svg" alt="p3q" width="880"></p>
+
 # P3Q
 
 > **P3Q** — a post-quantum-only profile and fork of Plonky3 for STARK/FRI
