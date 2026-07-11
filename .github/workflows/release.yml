@@ -43,7 +43,7 @@ jobs:
   docs:
     name: cargo doc
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: lux-build-amd64
     steps:
       - uses: actions/checkout@v4
 
@@ -65,7 +65,7 @@ jobs:
   release:
     name: GitHub Release
     needs: [check, docs]
-    runs-on: ubuntu-latest
+    runs-on: lux-build-amd64
     permissions:
       contents: write
     steps:
