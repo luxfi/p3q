@@ -357,6 +357,57 @@ mod tests {
         }
     }
 
+    /// A path authenticates a leaf AT AN INDEX, not merely "somewhere
+    /// in the tree". Both verifiers walk the index bit by bit to decide
+    /// the hash order at each level, so a genuine path replayed at any
+    /// other index must fail — otherwise an opening could be moved to a
+    /// position the prover was never challenged on.
+    #[test]
+    fn path_is_bound_to_its_index() {
+        use p3q_sha3::backend::CpuShake;
+        for log_n in 1..=5u32 {
+            let n = 1usize << log_n;
+            let l = leaves(n);
+            let t = MerkleTree::from_leaves(&l).unwrap();
+            for i in 0..n {
+                let p = t.open(i).unwrap();
+                for j in 0..n {
+                    let serial = verify_proof(&t.root(), &l[i], j, &p);
+                    let batched = verify_proof_batch(
+                        &CpuShake,
+                        &t.root(),
+                        &[BatchOpening {
+                            leaf: &l[i],
+                            index: j,
+                            proof: &p,
+                        }],
+                    );
+                    assert_eq!(serial.is_ok(), i == j, "leaf {i} accepted at index {j}");
+                    assert_eq!(batched.is_ok(), i == j, "batched: leaf {i} at index {j}");
+                }
+            }
+        }
+    }
+
+    /// The index is read modulo the tree size: only the low
+    /// `proof.siblings.len()` bits steer the walk, so `i` and
+    /// `i + 2^depth` are the same position. That is the contract, and
+    /// it means every caller must range-check the index itself. The FRI
+    /// verifier does — `wire::parse` refuses `query_index` outside the
+    /// LDE domain, and each layer index is masked to that layer's
+    /// log-size before it reaches here — so no out-of-range index is
+    /// ever presented. Pinned so a future caller does not assume the
+    /// check lives in this crate.
+    #[test]
+    fn index_bits_above_the_depth_are_not_read() {
+        let l = leaves(8);
+        let t = MerkleTree::from_leaves(&l).unwrap();
+        let p = t.open(3).unwrap();
+        assert_eq!(p.siblings.len(), 3);
+        verify_proof(&t.root(), &l[3], 3, &p).unwrap();
+        verify_proof(&t.root(), &l[3], 3 + 8, &p).expect("high bits are not part of the walk");
+    }
+
     /// Batched verify of an empty list of openings is a no-op accept.
     #[test]
     fn batch_verify_empty_accepts() {

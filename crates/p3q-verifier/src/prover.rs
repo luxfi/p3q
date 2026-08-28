@@ -81,6 +81,38 @@ pub fn prove(cfg: &ToyProverConfig) -> Result<ToyProof> {
         trace_lde.push(horner(&cfg.coeffs, x));
     }
 
+    prove_word(cfg.profile, header, &cfg.public_input, trace_lde)
+}
+
+/// Commit to `trace_lde` and fold it honestly under `header`.
+///
+/// The word is arbitrary — nothing here requires it to be a low-degree
+/// codeword, because nothing in FRI's *consistency* checks does either.
+/// [`prove`] is this function preceded by an evaluation, and an
+/// adversary is this function preceded by anything at all. Tests use
+/// the difference to ask whether the verifier's degree claim is real:
+/// every Merkle opening and every colinearity fold a proof from here
+/// carries is genuine, so if such a proof verifies over a high-degree
+/// word, the degree bound is not being enforced.
+///
+/// The header is NOT validated. An honest prover has no reason to mint
+/// an inadmissible proof, but a test of the verifier's refusals needs
+/// to, and so does an attacker.
+pub fn prove_word(
+    profile: ProofSystemId,
+    header: Header,
+    public_input: &[u8],
+    trace_lde: Vec<Goldilocks>,
+) -> Result<ToyProof> {
+    let log_lde = header.log_lde();
+    let n_full = 1usize << log_lde;
+    if trace_lde.len() != n_full {
+        return Err(P3qError::InvalidLength(
+            "toy prover: trace len must equal 2^log_lde",
+        ));
+    }
+    let omega = lde_generator(log_lde)?;
+
     // ---- Commit trace LDE ----
     let trace_leaves: Vec<Vec<u8>> = trace_lde.iter().map(|v| v.to_bytes()).collect();
     let trace_tree = MerkleTree::from_leaves(&trace_leaves)
@@ -88,10 +120,10 @@ pub fn prove(cfg: &ToyProverConfig) -> Result<ToyProof> {
     let trace_root = trace_tree.root();
 
     // ---- Replay transcript phase 1: header + pi + trace root ----
-    let mut transcript = VerifierTranscript::new(cfg.profile);
+    let mut transcript = VerifierTranscript::new(profile);
     let header_bytes = header.encode();
     transcript.observe_header(&header_bytes);
-    transcript.observe_public_input(&cfg.public_input);
+    transcript.observe_public_input(public_input);
     transcript.observe_trace_root(&trace_root);
     let mut fold_challenges = Vec::with_capacity(header.num_fri_rounds() as usize);
     fold_challenges.push(transcript.squeeze_field()?);
@@ -189,7 +221,7 @@ pub fn prove(cfg: &ToyProverConfig) -> Result<ToyProof> {
 
     let parsed = ParsedProof {
         header,
-        public_input: cfg.public_input.clone(),
+        public_input: public_input.to_vec(),
         trace_root,
         fri_layer_roots,
         final_poly,

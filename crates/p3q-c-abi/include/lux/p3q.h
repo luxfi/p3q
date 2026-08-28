@@ -124,6 +124,17 @@ uint8_t p3q_profile_sha3(void);
 uint8_t p3q_profile_keccak(void);
 
 /**
+ * Query-phase soundness, in bits, that the linked verifier requires
+ * of a proof's `(log_blowup, num_queries)` before it will do any work.
+ *
+ * Exported so a caller enforcing the same floor ahead of the FFI —
+ * the Lux `starkfri` precompile does, to keep the policy legible in
+ * the chain's own code — can assert it agrees with the verifier it
+ * links, rather than carrying a second copy that drifts.
+ */
+uint32_t p3q_min_soundness_bits(void);
+
+/**
  * Semver string for the linked p3q-c-abi crate. Returns a static
  * nul-terminated UTF-8 string. The caller must NOT free this pointer.
  */

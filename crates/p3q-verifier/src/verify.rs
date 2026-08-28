@@ -3,6 +3,10 @@
 //! This is the audit-grade body. Each step is decomposed into a small
 //! function with a single responsibility:
 //!
+//! 0. [`crate::Header::check_admissible`] + [`check_claimed_degree`] —
+//!    refuse parameters below the soundness floor, and refuse a final
+//!    polynomial carrying more coefficients than the degree ladder
+//!    leaves alive. Both run before the transcript is touched.
 //! 1. [`bind_transcript_through_commitments`] — replay Fiat-Shamir up
 //!    to the trace+layer commits, capturing per-layer fold challenges.
 //! 2. [`derive_query_indices`] — squeeze the query indices from the
@@ -67,17 +71,27 @@ pub fn verify_parsed_with_backend(
     public_input: &[u8],
     backend: &dyn Sha3Backend,
 ) -> Result<()> {
-    // ----- 0. Public-input binding -----
+    // ----- 0. Admissible parameters, then the claimed degree -----
+    //
+    // Wire proofs already cleared this in `Header::decode`; a
+    // `ParsedProof` built in memory — which is how the circuit
+    // verifiers described in lib.rs wrap this kernel — has not. Same
+    // predicate, the other door: the policy has one definition and
+    // every path into the kernel crosses one of the two.
+    parsed.header.check_admissible()?;
+    check_claimed_degree(parsed)?;
+
+    // ----- 1. Public-input binding -----
     if parsed.public_input.as_slice() != public_input {
         return Err(P3qError::StarkVerification(
             "public input does not match embedded value",
         ));
     }
 
-    // ----- 1. Bind transcript through commits, capture fold randomness -----
+    // ----- 2. Bind transcript through commits, capture fold randomness -----
     let bindings = bind_transcript_through_commitments(profile, parsed)?;
 
-    // ----- 2. Re-derive query indices, check echoes -----
+    // ----- 3. Re-derive query indices, check echoes -----
     let mut transcript = rebind_for_queries(profile, parsed)?;
     let log_lde = parsed.header.log_lde();
     for q in &parsed.queries {
@@ -87,7 +101,7 @@ pub fn verify_parsed_with_backend(
         }
     }
 
-    // ----- 3. Per-query wire-format invariants + batched Merkle auth -----
+    // ----- 4. Per-query wire-format invariants + batched Merkle auth -----
     //
     // All Merkle authentications across all queries are independent
     // (each only depends on `trace_root` or one `fri_layer_roots[i]`).
@@ -97,7 +111,7 @@ pub fn verify_parsed_with_backend(
     check_query_invariants(parsed)?;
     authenticate_all_queries_batched(backend, parsed)?;
 
-    // ----- 4-5. Per-query colinearity + final-poly checks -----
+    // ----- 5. Per-query colinearity + final-poly consistency -----
     //
     // Run AFTER Merkle authentication so we don't waste time on a
     // colinearity-rejection path for a tampered proof — the cheap fold
@@ -130,6 +144,38 @@ fn select_backend() -> std::sync::Arc<dyn Sha3Backend> {
             p3q_sha3::backend::default_backend()
         })
         .clone()
+}
+
+/// Enforce the degree the header claims.
+///
+/// Everything else in this kernel checks CONSISTENCY: that the layers
+/// fold into one another, that the openings sit under the roots, that
+/// the final value agrees with the final polynomial. A prover who
+/// commits to an arbitrary word and folds it honestly satisfies all of
+/// it — folding is a linear map, so a random word folds to a well
+/// defined final layer and any `2^log_final_poly` values interpolate
+/// to some polynomial of that size. Consistency alone therefore proves
+/// nothing about degree, at any number of queries.
+///
+/// The claim becomes falsifiable at exactly one place: the ladder
+/// leaves only [`Header::final_poly_terms`] coefficients alive, while
+/// the wire carries `2^log_final_poly` of them. The surplus must be
+/// zero. That gap is the low-degree test.
+fn check_claimed_degree(parsed: &ParsedProof) -> Result<()> {
+    let terms = parsed.header.final_poly_terms();
+    if parsed.final_poly.len() < terms {
+        return Err(P3qError::InvalidEncoding(
+            "final polynomial shorter than the claimed degree",
+        ));
+    }
+    for c in parsed.final_poly.iter().skip(terms) {
+        if *c != Goldilocks::default() {
+            return Err(P3qError::FriVerification(
+                "final polynomial exceeds the claimed degree bound",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Per-query wire-format invariants. Extracted from the old
@@ -414,5 +460,41 @@ mod tests {
     fn empty_proof_yields_invalid_encoding() {
         let res = crate::wire::parse(&[]);
         assert!(matches!(res, Err(P3qError::InvalidLength(_))));
+    }
+
+    /// The kernel's own door. Wire proofs clear the floor in
+    /// `Header::decode`, but a `ParsedProof` assembled in memory —
+    /// which is how lib.rs documents circuit verifiers wrapping this
+    /// kernel — never touches that path. The floor has to hold here
+    /// too, or wrapping the kernel is a way around it.
+    #[test]
+    fn kernel_refuses_sub_floor_parsed_proof() {
+        use crate::prover::prove_word;
+        use crate::wire::{Header, MIN_SOUNDNESS_BITS};
+        use p3q_field::Goldilocks;
+
+        let pi = b"kernel";
+        let header = Header {
+            log_degree_bound: 3,
+            log_blowup: 2,
+            log_arity: 1,
+            num_queries: 1, // 2 bits, far below the floor
+            log_final_poly: 2,
+            public_input_len: pi.len() as u16,
+        };
+        assert!(header.soundness_bits() < MIN_SOUNDNESS_BITS);
+        let n = 1usize << header.log_lde();
+        let omega = Goldilocks::two_adic_generator(header.log_lde()).unwrap();
+        let coeffs: Vec<_> = (1u64..=8).map(Goldilocks::from_u64).collect();
+        let word: Vec<Goldilocks> = (0..n)
+            .map(|k| horner(&coeffs, omega.pow(k as u64)))
+            .collect();
+        // An honest, low-degree word: the ONLY thing wrong is the
+        // parameter count, so a refusal can only come from the floor.
+        let toy = prove_word(ProofSystemId::Sha3, header, pi, word).unwrap();
+        assert!(matches!(
+            verify_parsed(ProofSystemId::Sha3, &toy.parsed, pi),
+            Err(P3qError::InvalidEncoding(_))
+        ));
     }
 }

@@ -13,7 +13,7 @@
 //!     log_blowup          u8  (1..=5)
 //!     log_arity           u8  (== 1 in v1; binary folding only)
 //!     num_queries         u8  (1..=64)
-//!     log_final_poly      u8  (0..=10)  must satisfy log_final_poly < log_degree_bound
+//!     log_final_poly      u8  (0..=10)  log_blowup <= log_final_poly < log_degree_bound
 //!     flags               u8  (reserved, must be 0)
 //!     reserved            u8  (must be 0)
 //!     public_input_len    u16 BE
@@ -41,7 +41,9 @@
 //!
 //! Every length, range and well-formedness check happens here, BEFORE
 //! any cryptographic work — the verifier rejects ill-formed proofs in
-//! O(parse) time without touching the transcript.
+//! O(parse) time without touching the transcript. The soundness floor
+//! ([`MIN_SOUNDNESS_BITS`]) is checked earlier still, off the ten
+//! header bytes, before a single query opening is allocated.
 
 use p3q_core::{P3qError, Result};
 use p3q_field::{Field, Goldilocks};
@@ -55,6 +57,46 @@ pub const FOLD_ARITY_LOG2: u8 = 1;
 
 /// Header byte width.
 pub const HEADER_LEN: usize = 10;
+
+/// Query-phase soundness a proof must carry to be admissible, in bits.
+///
+/// FRI's query phase repeats an independent consistency check `q =
+/// num_queries` times against a codeword of rate `ρ = 2^-log_blowup`.
+/// A prover committed to a word `δ`-far from the code survives one
+/// query with probability `1 - δ`, so the query-phase soundness error
+/// is `(1 - δ)^q`, and how large `δ` may be is exactly what the
+/// proximity theorem in force allows:
+///
+/// | proximity bound                      | max δ                | error       | bits per query |
+/// |--------------------------------------|----------------------|-------------|----------------|
+/// | unique decoding (BBHR18)             | `(1-ρ)/2`            | `((1+ρ)/2)^q` | 0.42 … 0.96  |
+/// | Johnson, provable (BCIKS20 Thm 8.3)  | `1-√ρ-√ρ/2m`         | `(√ρ(1+1/2m))^q` | ≈ b/2     |
+/// | capacity, conjectured (ethSTARK 5.6) | `1-ρ`                | `ρ^q`       | b              |
+///
+/// This constant is stated in the **capacity** metric, where one query
+/// buys exactly `log_blowup` bits, so admissibility is the integer
+/// predicate `log_blowup * num_queries >= MIN_SOUNDNESS_BITS` — no
+/// floating point, no table, identical on every platform, which is
+/// what a consensus rule needs. Under the provable Johnson bound the
+/// same parameters deliver about half as much (128 capacity bits ≈ 61
+/// provable bits at `log_blowup = 2, num_queries = 64`).
+///
+/// 128 rather than the common 100: `num_queries` is capped at 64 by
+/// the wire, so the reachable settings are `log_blowup ∈ {2,3,4,5}`
+/// with `num_queries ≥ {64,43,32,26}` — every blowup but rate-1/2
+/// stays usable, and rate-1/2 cannot reach 128 bits under *any* of the
+/// three bounds with 64 queries, so excluding it costs nothing real.
+/// Raising a consensus floor later invalidates proofs already minted
+/// under it, so it is set once, high, before anything is deployed.
+///
+/// This bounds the QUERY phase only. The commit phase is bounded by
+/// the proximity-gap term, which scales as `N²/|F|` for domain size
+/// `N` and challenge field `F`; challenges here are drawn from the
+/// Goldilocks BASE field (`|F| < 2^64`), which caps commit-phase
+/// soundness at `64 - 2*log_lde` bits before constants — about 18 bits
+/// at `log_lde = 16`. No number of queries moves that; only a wider
+/// challenge field does.
+pub const MIN_SOUNDNESS_BITS: u32 = 128;
 
 /// Decoded header. Every field is bounds-checked in [`Header::decode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,8 +116,113 @@ pub struct Header {
 }
 
 impl Header {
-    /// Decode 10 bytes into a header, validating every field against
-    /// audited bounds before returning.
+    /// Bits of query-phase soundness these parameters deliver, in the
+    /// capacity metric one query buys `log_blowup` bits. See
+    /// [`MIN_SOUNDNESS_BITS`] for the three proximity regimes and why
+    /// this is the one the floor is stated in.
+    ///
+    /// Widest value is `5 * 64 = 320`, so the product never overflows.
+    #[inline]
+    pub const fn soundness_bits(&self) -> u32 {
+        self.log_blowup as u32 * self.num_queries as u32
+    }
+
+    /// How many coefficients the FRI degree ladder leaves alive in
+    /// `final_poly`.
+    ///
+    /// Layer 0 claims degree `< 2^log_degree_bound` over a domain of
+    /// `2^log_lde` points. Each fold halves domain AND degree bound, so
+    /// after `num_fri_rounds = log_lde - log_final_poly` folds the
+    /// surviving bound is
+    ///
+    /// ```text
+    /// 2^(log_degree_bound - num_fri_rounds) = 2^(log_final_poly - log_blowup)
+    /// ```
+    ///
+    /// The final layer is sent as `2^log_final_poly` coefficients —
+    /// `2^log_blowup` times more room than the ladder permits. Every
+    /// coefficient past this count MUST be zero; that gap is the
+    /// degree bound, and it is the only place the claim
+    /// "`log_degree_bound`" is enforced at all.
+    ///
+    /// Saturating so an unchecked header cannot underflow; on an
+    /// admissible header (`log_final_poly >= log_blowup`) it is exact.
+    #[inline]
+    pub const fn final_poly_terms(&self) -> usize {
+        1usize << self.log_final_poly.saturating_sub(self.log_blowup)
+    }
+
+    /// The one admissibility predicate: every constraint on the header
+    /// VALUES, in one place, so each entry point into the verifier asks
+    /// the same question. [`decode`](Self::decode) calls it for proofs
+    /// arriving over the wire; the kernel calls it for `Header` values
+    /// built in memory. Neither owns a copy of the policy.
+    ///
+    /// This is not a range check. A range check asks of each field
+    /// alone "is this byte encodable", and its job is to make parsing
+    /// total; every field here already passes one. This asks of the
+    /// TUPLE "do these parameters describe a sound instance", and its
+    /// job is to make acceptance mean something. The two are different
+    /// shapes: `(log_blowup=1, num_queries=64)` and
+    /// `(log_blowup=5, num_queries=1)` sit inside every range and
+    /// neither is admissible, because the admissible set is bounded by
+    /// `log_blowup * num_queries`, a hyperbola, and no box contains
+    /// exactly the region above a hyperbola.
+    pub fn check_admissible(&self) -> Result<()> {
+        if !(1..=20).contains(&self.log_degree_bound) {
+            return Err(P3qError::InvalidEncoding(
+                "header: log_degree_bound out of range",
+            ));
+        }
+        if !(1..=5).contains(&self.log_blowup) {
+            return Err(P3qError::InvalidEncoding("header: log_blowup out of range"));
+        }
+        if self.log_arity != FOLD_ARITY_LOG2 {
+            return Err(P3qError::InvalidEncoding(
+                "header: log_arity must be 1 (binary fold only in v1)",
+            ));
+        }
+        if !(1..=64).contains(&self.num_queries) {
+            return Err(P3qError::InvalidEncoding(
+                "header: num_queries out of range",
+            ));
+        }
+        if self.log_final_poly > 10 {
+            return Err(P3qError::InvalidEncoding(
+                "header: log_final_poly out of range",
+            ));
+        }
+        // Folding must terminate strictly before the final layer.
+        if self.log_final_poly >= self.log_degree_bound {
+            return Err(P3qError::InvalidEncoding(
+                "header: log_final_poly >= log_degree_bound",
+            ));
+        }
+        // ...and must not run PAST degree 1: after `num_fri_rounds`
+        // folds the surviving degree bound is
+        // `2^(log_final_poly - log_blowup)`, which is a whole
+        // coefficient only while `log_final_poly >= log_blowup`. Below
+        // that the ladder claims "degree < 1", i.e. the final
+        // polynomial is identically zero — a claim no honest prover
+        // with a non-zero trace can make, so the configuration is
+        // degenerate rather than merely wasteful.
+        if self.log_final_poly < self.log_blowup {
+            return Err(P3qError::InvalidEncoding(
+                "header: log_final_poly < log_blowup (folds past degree 1)",
+            ));
+        }
+        if self.soundness_bits() < MIN_SOUNDNESS_BITS {
+            return Err(P3qError::InvalidEncoding(
+                "header: parameters below the soundness floor",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Decode 10 bytes into a header. The two reserved bytes are facts
+    /// about the ENCODING and are checked here; every constraint on the
+    /// decoded values comes from [`check_admissible`](Self::check_admissible),
+    /// so a `Header` returned from this function is admissible.
     pub fn decode(buf: &[u8]) -> Result<Self> {
         if buf.len() < HEADER_LEN {
             return Err(P3qError::InvalidLength("header: short"));
@@ -83,60 +230,24 @@ impl Header {
         if buf[0] != WIRE_VERSION {
             return Err(P3qError::InvalidEncoding("header: wrong version"));
         }
-        let log_degree_bound = buf[1];
-        let log_blowup = buf[2];
-        let log_arity = buf[3];
-        let num_queries = buf[4];
-        let log_final_poly = buf[5];
-        let flags = buf[6];
-        let reserved = buf[7];
-        let public_input_len = u16::from_be_bytes([buf[8], buf[9]]);
-
-        if !(1..=20).contains(&log_degree_bound) {
-            return Err(P3qError::InvalidEncoding(
-                "header: log_degree_bound out of range",
-            ));
-        }
-        if !(1..=5).contains(&log_blowup) {
-            return Err(P3qError::InvalidEncoding("header: log_blowup out of range"));
-        }
-        if log_arity != FOLD_ARITY_LOG2 {
-            return Err(P3qError::InvalidEncoding(
-                "header: log_arity must be 1 (binary fold only in v1)",
-            ));
-        }
-        if !(1..=64).contains(&num_queries) {
-            return Err(P3qError::InvalidEncoding(
-                "header: num_queries out of range",
-            ));
-        }
-        if log_final_poly > 10 {
-            return Err(P3qError::InvalidEncoding(
-                "header: log_final_poly out of range",
-            ));
-        }
-        // Folding must terminate strictly before the final layer.
-        if log_final_poly >= log_degree_bound {
-            return Err(P3qError::InvalidEncoding(
-                "header: log_final_poly >= log_degree_bound",
-            ));
-        }
-        if flags != 0 {
+        if buf[6] != 0 {
             return Err(P3qError::InvalidEncoding(
                 "header: reserved flags must be 0",
             ));
         }
-        if reserved != 0 {
+        if buf[7] != 0 {
             return Err(P3qError::InvalidEncoding("header: reserved byte must be 0"));
         }
-        Ok(Self {
-            log_degree_bound,
-            log_blowup,
-            log_arity,
-            num_queries,
-            log_final_poly,
-            public_input_len,
-        })
+        let header = Self {
+            log_degree_bound: buf[1],
+            log_blowup: buf[2],
+            log_arity: buf[3],
+            num_queries: buf[4],
+            log_final_poly: buf[5],
+            public_input_len: u16::from_be_bytes([buf[8], buf[9]]),
+        };
+        header.check_admissible()?;
+        Ok(header)
     }
 
     /// log2 of the LDE domain size.
@@ -462,13 +573,15 @@ pub fn parse(body: &[u8]) -> Result<ParsedProof> {
 mod tests {
     use super::*;
 
+    /// The cheapest admissible header: exactly `MIN_SOUNDNESS_BITS`,
+    /// and `log_blowup <= log_final_poly < log_degree_bound`.
     fn good_header() -> Header {
         Header {
-            log_degree_bound: 4,
-            log_blowup: 3,
+            log_degree_bound: 3,
+            log_blowup: 2,
             log_arity: 1,
-            num_queries: 8,
-            log_final_poly: 1,
+            num_queries: 64,
+            log_final_poly: 2,
             public_input_len: 4,
         }
     }
@@ -527,6 +640,103 @@ mod tests {
             Header::decode(&[0u8; 4]),
             Err(P3qError::InvalidLength(_))
         ));
+    }
+
+    /// The floor decides the whole `(log_blowup, num_queries)` grid,
+    /// and decides it by the PRODUCT. Every point in the range is
+    /// admissible exactly when `log_blowup * num_queries >=
+    /// MIN_SOUNDNESS_BITS` — so this pins the boundary at every blowup
+    /// at once: one query below the line refuses, one query on it
+    /// accepts. A per-field minimum would fail here, because the
+    /// admissible region is not a box.
+    #[test]
+    fn floor_is_a_product_not_a_box() {
+        for log_blowup in 1u8..=5 {
+            let mut seen_boundary = false;
+            for num_queries in 1u8..=64 {
+                let h = Header {
+                    log_degree_bound: log_blowup + 1,
+                    log_blowup,
+                    log_arity: FOLD_ARITY_LOG2,
+                    num_queries,
+                    log_final_poly: log_blowup,
+                    public_input_len: 0,
+                };
+                let bits = log_blowup as u32 * num_queries as u32;
+                assert_eq!(h.soundness_bits(), bits);
+                let want = bits >= MIN_SOUNDNESS_BITS;
+                assert_eq!(
+                    h.check_admissible().is_ok(),
+                    want,
+                    "log_blowup={log_blowup} num_queries={num_queries} ({bits} bits)"
+                );
+                // Round-tripping through the wire must not change the
+                // verdict: the floor is not an in-memory-only rule.
+                assert_eq!(Header::decode(&h.encode()).is_ok(), want);
+                if want && !seen_boundary {
+                    seen_boundary = true;
+                    assert!(
+                        num_queries == 1 || {
+                            let below = log_blowup as u32 * (num_queries - 1) as u32;
+                            below < MIN_SOUNDNESS_BITS
+                        },
+                        "boundary is not tight at log_blowup={log_blowup}"
+                    );
+                }
+            }
+            // Rate 1/2 cannot reach the floor with 64 queries under any
+            // proximity bound, so it must be unreachable entirely.
+            if log_blowup == 1 {
+                assert!(!seen_boundary, "log_blowup=1 must be unreachable");
+            } else {
+                assert!(seen_boundary, "log_blowup={log_blowup} must be reachable");
+            }
+        }
+    }
+
+    /// The degree ladder must not run past degree 1: after
+    /// `num_fri_rounds` folds the surviving bound is
+    /// `2^(log_final_poly - log_blowup)`, so `log_final_poly` below
+    /// `log_blowup` claims the final polynomial is identically zero.
+    #[test]
+    fn header_rejects_folding_past_degree_one() {
+        let mut h = good_header();
+        h.log_final_poly = h.log_blowup - 1;
+        assert!(matches!(
+            h.check_admissible(),
+            Err(P3qError::InvalidEncoding(_))
+        ));
+        assert!(matches!(
+            Header::decode(&h.encode()),
+            Err(P3qError::InvalidEncoding(_))
+        ));
+    }
+
+    /// `final_poly_terms` is the ladder's arithmetic, so it must agree
+    /// with walking the ladder one fold at a time.
+    #[test]
+    fn final_poly_terms_matches_the_ladder() {
+        for log_blowup in 2u8..=5 {
+            for log_final_poly in log_blowup..=10 {
+                for log_degree_bound in (log_final_poly + 1)..=12 {
+                    let h = Header {
+                        log_degree_bound,
+                        log_blowup,
+                        log_arity: FOLD_ARITY_LOG2,
+                        num_queries: 64,
+                        log_final_poly,
+                        public_input_len: 0,
+                    };
+                    // Halve the degree bound once per fold round.
+                    let mut bound = 1u64 << log_degree_bound;
+                    for _ in 0..h.num_fri_rounds() {
+                        bound /= 2;
+                    }
+                    assert_eq!(h.final_poly_terms() as u64, bound.max(1));
+                    assert!(h.final_poly_terms() <= 1usize << log_final_poly);
+                }
+            }
+        }
     }
 
     #[test]
