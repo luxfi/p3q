@@ -156,6 +156,18 @@ pub extern "C" fn p3q_profile_keccak() -> u8 {
     p3q_core::ProofSystemId::Keccak.as_byte()
 }
 
+/// Query-phase soundness, in bits, that the linked verifier requires
+/// of a proof's `(log_blowup, num_queries)` before it will do any work.
+///
+/// Exported so a caller enforcing the same floor ahead of the FFI —
+/// the Lux `starkfri` precompile does, to keep the policy legible in
+/// the chain's own code — can assert it agrees with the verifier it
+/// links, rather than carrying a second copy that drifts.
+#[no_mangle]
+pub extern "C" fn p3q_min_soundness_bits() -> u32 {
+    p3q_verifier::MIN_SOUNDNESS_BITS
+}
+
 /// Semver string for the linked p3q-c-abi crate. Returns a static
 /// nul-terminated UTF-8 string. The caller must NOT free this pointer.
 #[no_mangle]

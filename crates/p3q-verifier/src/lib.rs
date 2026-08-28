@@ -31,7 +31,7 @@ mod wire;
 pub mod prover;
 
 pub use transcript::labels as transcript_labels;
-pub use wire::{Header, LayerOpening, ParsedProof, QueryOpening};
+pub use wire::{Header, LayerOpening, ParsedProof, QueryOpening, MIN_SOUNDNESS_BITS};
 
 use p3q_core::{P3qError, ProofBytes, ProofSystemId, Result};
 
@@ -84,13 +84,20 @@ mod tests {
     use p3q_field::Goldilocks;
 
     fn make_proof(profile: ProofSystemId) -> (Vec<u8>, Vec<u8>) {
-        // Toy polynomial: f(x) = 1 + 2x + 3x^2 + 4x^3 + ... + 16x^15.
-        let coeffs: Vec<_> = (1u64..=16).map(Goldilocks::from_u64).collect();
+        // Toy polynomial: f(x) = 1 + 2x + 3x^2 + ... + 8x^7.
+        //
+        // Parameters are the cheapest point on the admissible set:
+        // 2 * 64 = 128 = MIN_SOUNDNESS_BITS exactly, and
+        // log_blowup <= log_final_poly < log_degree_bound. The ladder
+        // leaves 2^(2-2) = 1 coefficient alive, so the honest final
+        // polynomial is a constant and the three surplus coefficients
+        // are zero.
+        let coeffs: Vec<_> = (1u64..=8).map(Goldilocks::from_u64).collect();
         let cfg = ToyProverConfig {
-            log_degree_bound: 4, // 16 coefficients
-            log_blowup: 3,       // LDE size = 128
-            num_queries: 16,
-            log_final_poly: 1, // final layer of 2 evals -> 2 coeffs
+            log_degree_bound: 3, // 8 coefficients
+            log_blowup: 2,       // LDE size = 32
+            num_queries: 64,
+            log_final_poly: 2, // final layer of 4 evals
             profile,
             public_input: b"P3Q v0.1.0 golden vector".to_vec(),
             coeffs,
@@ -262,12 +269,121 @@ mod tests {
         let (pi, mut proof) = make_proof(ProofSystemId::Sha3);
         let pi_len = pi.len();
         // Skip: profile(1) + header(10) + pi + trace_root(32) +
-        // 2 layer roots (64) + final_poly_len(2) + 2 final-poly fields (16).
-        let queries_off = 1 + 10 + pi_len + 32 + 64 + 2 + 16;
-        // The first query starts here: 4 bytes of query index.
-        proof[queries_off] ^= 0x80;
+        // 2 layer roots (64) + final_poly_len(2) + 4 final-poly fields (32).
+        let queries_off = 1 + 10 + pi_len + 32 + 64 + 2 + 32;
+        // The first query starts here: query_index as u32 BE. Flip the
+        // LOW byte — the index stays inside the LDE domain, so parsing
+        // succeeds and the disagreement surfaces where it should, at
+        // the transcript re-derivation. (Flipping a high byte would
+        // push the index out of the domain and be caught at parse,
+        // which tests a different guard.)
+        proof[queries_off + 3] ^= 0x01;
         let res = verify(&pi, &ProofBytes::new(proof));
         assert!(matches!(res, Err(P3qError::Transcript(_))));
+    }
+
+    /// Mint an honest proof at `(log_blowup, num_queries)` and report
+    /// the verifier's verdict. `log_degree_bound` and `log_final_poly`
+    /// track `log_blowup` so only the two parameters under test vary.
+    fn admits(log_blowup: u8, num_queries: u8) -> bool {
+        let n_coeffs = 1usize << (log_blowup + 1);
+        let coeffs: Vec<_> = (1..=n_coeffs as u64).map(Goldilocks::from_u64).collect();
+        let cfg = ToyProverConfig {
+            log_degree_bound: log_blowup + 1,
+            log_blowup,
+            num_queries,
+            log_final_poly: log_blowup,
+            profile: ProofSystemId::Sha3,
+            public_input: b"floor".to_vec(),
+            coeffs,
+        };
+        let toy = prove(&cfg).expect("toy prover does not enforce the floor");
+        let mut full = vec![ProofSystemId::Sha3.as_byte()];
+        full.extend_from_slice(&toy.body);
+        verify(&cfg.public_input, &ProofBytes::new(full)).is_ok()
+    }
+
+    /// End-to-end, through the same `verify` an on-chain caller reaches:
+    /// exactly at the floor a proof is accepted, one query below it is
+    /// not. The prover mints both — the refusal is the verifier's.
+    #[test]
+    fn floor_boundary_end_to_end() {
+        for log_blowup in 2u8..=5 {
+            let at = (MIN_SOUNDNESS_BITS as u8).div_ceil(log_blowup);
+            assert!(at >= 1 && at <= 64);
+            assert!(admits(log_blowup, at), "log_blowup={log_blowup} q={at}");
+            assert!(
+                !admits(log_blowup, at - 1),
+                "log_blowup={log_blowup} q={} must refuse",
+                at - 1
+            );
+        }
+        // Rate 1/2 is out of reach at every query count the wire allows.
+        assert!(!admits(1, 64));
+    }
+
+    /// A prover who commits to an arbitrary word and folds it honestly
+    /// satisfies every consistency check in the protocol: the Merkle
+    /// openings are real, the colinearity folds are real, and the final
+    /// layer interpolates to a real polynomial. If the verifier's
+    /// degree claim is not separately enforced, that prover verifies —
+    /// at any number of queries — and the floor buys nothing.
+    #[test]
+    fn arbitrary_word_refused() {
+        let pi = b"degree";
+        let header = Header {
+            log_degree_bound: 3, // claim: degree < 8
+            log_blowup: 2,
+            log_arity: 1,
+            num_queries: 64, // the strongest setting the wire allows
+            log_final_poly: 2,
+            public_input_len: pi.len() as u16,
+        };
+        let n = 1usize << header.log_lde();
+        let omega = p3q_field::Goldilocks::two_adic_generator(header.log_lde()).unwrap();
+        let eval_of = |coeffs: &[Goldilocks]| -> Vec<Goldilocks> {
+            (0..n)
+                .map(|k| {
+                    let x = omega.pow(k as u64);
+                    coeffs
+                        .iter()
+                        .rev()
+                        .fold(Goldilocks::default(), |a, &c| a * x + c)
+                })
+                .collect()
+        };
+        let mint = |word: Vec<Goldilocks>| {
+            let toy = prover::prove_word(ProofSystemId::Sha3, header, pi, word).unwrap();
+            let mut full = vec![ProofSystemId::Sha3.as_byte()];
+            full.extend_from_slice(&toy.body);
+            verify(pi, &ProofBytes::new(full))
+        };
+
+        // Honest: degree 7, inside the claimed bound of 8.
+        let honest: Vec<_> = (1u64..=8).map(Goldilocks::from_u64).collect();
+        mint(eval_of(&honest)).expect("honest word must verify");
+
+        // Degree 31 — four times the claimed bound.
+        let high: Vec<_> = (1u64..=32).map(Goldilocks::from_u64).collect();
+        assert!(
+            matches!(mint(eval_of(&high)), Err(P3qError::FriVerification(_))),
+            "a word above the claimed degree must be refused by the degree check"
+        );
+
+        // A uniformly random word, close to no low-degree codeword at all.
+        let mut s = 0x243F6A8885A308D3u64;
+        let noise: Vec<Goldilocks> = (0..n)
+            .map(|_| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                Goldilocks::from_u64(s % p3q_field::goldilocks::P)
+            })
+            .collect();
+        assert!(
+            matches!(mint(noise), Err(P3qError::FriVerification(_))),
+            "a random word must be refused by the degree check"
+        );
     }
 
     #[test]
@@ -288,6 +404,50 @@ mod tests {
         proof[last] ^= 0x01;
         let res = verify(&pi, &ProofBytes::new(proof));
         assert!(res.is_err(), "tampered query bytes must reject");
+    }
+
+    /// Is anything an attacker writes left outside the binding?
+    ///
+    /// Reading the transcript tells you what is absorbed; it does not
+    /// tell you what is FREE. This asks the question the other way
+    /// round: change each byte of a real proof in turn and require the
+    /// verdict to change. A byte that could be flipped without effect
+    /// would be a byte the prover chooses and nothing constrains —
+    /// exactly the gap a "the header is transcript-bound" claim is
+    /// supposed to rule out. There is no such byte.
+    ///
+    /// Covers the header (including the two reserved bytes), the
+    /// public-input echo, the trace root, every FRI layer root, the
+    /// final-polynomial length and coefficients, and every query
+    /// index, value and authentication path.
+    #[test]
+    fn every_proof_byte_is_load_bearing() {
+        let (pi, proof) = make_proof(ProofSystemId::Sha3);
+        verify(&pi, &ProofBytes::new(proof.clone())).expect("baseline must verify");
+
+        // One verify per byte over a 53 KiB proof is a minute serially;
+        // the flips are independent, so split them across the machine.
+        let lanes = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let span = proof.len().div_ceil(lanes);
+        std::thread::scope(|s| {
+            for lane in 0..lanes {
+                let (pi, proof) = (&pi, &proof);
+                s.spawn(move || {
+                    let start = lane * span;
+                    for i in start..(start + span).min(proof.len()) {
+                        let mut mutant = proof.clone();
+                        mutant[i] ^= 0x01;
+                        assert!(
+                            verify(pi, &ProofBytes::new(mutant)).is_err(),
+                            "flipping byte {i} of {} left the proof acceptable",
+                            proof.len()
+                        );
+                    }
+                });
+            }
+        });
     }
 
     #[test]
@@ -353,7 +513,7 @@ mod tests {
             "p3q toy-AIR verify wall-clock: {:.1} us/iter ({} iters in {:?})",
             per_iter_us, iters, elapsed
         );
-        // Sanity bound: the toy AIR (degree 16, blowup 8, 16 queries)
+        // Sanity bound: the toy AIR (degree 8, blowup 4, 64 queries)
         // verifies in well under 10 ms on any modern host. Set the
         // assertion at 100 ms so a CI host under load doesn't flake
         // but a real regression would still be caught.
