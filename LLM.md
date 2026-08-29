@@ -89,8 +89,54 @@ crates/
 - Z-Chain integration crate: `crates/p3q-zchain/`
 - Vectors: `vectors/`
 
+## What decides whether a proof is sound
+
+A proof carries its own security parameters, so two things about the
+header decide whether accepting it means anything. Both live in
+`crates/p3q-verifier/src/wire.rs` and are asked by one function,
+`Header::check_admissible`, called from `Header::decode` (the wire
+door) and from `verify::verify_parsed_with_backend` (the door a
+circuit verifier that builds a `ParsedProof` in memory would use).
+
+- **Soundness floor.** `MIN_SOUNDNESS_BITS = 128`, enforced as
+  `log_blowup * num_queries >= 128`. Query-phase soundness is
+  `(1 - delta)^num_queries`, with `delta` set by whichever proximity
+  bound is in force: `1 - rho` (capacity, conjectured; one query buys
+  `log_blowup` bits), `1 - sqrt(rho) - sqrt(rho)/2m` (Johnson,
+  provable, BCIKS20 Thm 8.3; about half that), or `(1 - rho)/2`
+  (unique decoding; under one bit per query at every blowup). The
+  constant is stated in the capacity metric because it makes the
+  predicate an exact integer product. Reachable at `log_blowup`
+  2/3/4/5 with `num_queries` 64/43/32/26; `log_blowup = 1` cannot
+  reach it under any bound within the 64-query wire ceiling.
+- **Degree ladder.** After `num_fri_rounds` folds the surviving degree
+  bound is `2^(log_final_poly - log_blowup)`, so the header must have
+  `log_final_poly >= log_blowup` and `verify.rs::check_claimed_degree`
+  requires every `final_poly` coefficient past
+  `Header::final_poly_terms` to be zero. Without that the low-degree
+  test is vacuous at every parameter setting: folding is linear, so a
+  prover who commits to an ARBITRARY word and folds it honestly
+  satisfies every Merkle opening, every colinearity check and the
+  final-polynomial evaluation. `tests::arbitrary_word_refused` pins it
+  with a uniformly random word.
+
+**The commit phase is the remaining ceiling and the floor does not
+move it.** Fold challenges are drawn from the Goldilocks BASE field
+(`squeeze_field` returns `Goldilocks`, `|F| < 2^64`), and the
+proximity-gap term scales as `N^2/|F|`, so provable commit-phase
+soundness is at most `64 - 2*log_lde` bits before constants — with
+BCIKS20's constant, about 18 bits at `log_lde = 16` and vacuous by
+`log_lde = 20`. No query count changes it; a degree-2 challenge
+extension raises it to about 62 bits, a degree-3 extension past 100.
+Upstream Plonky3 and ethSTARK both draw challenges from an extension
+for exactly this reason. Widening it is a wire and transcript change,
+not a patch.
+
 ## Open follow-ups
 
+- **Challenge field is the binding constraint** (see above). Until it
+  widens, the total provable soundness of this verifier is in the
+  20-30 bit range, whatever the floor says.
 - cSHAKE256 Merkle / Fiat-Shamir substitution: LANDED in `p3q-verifier`
   (transcript root labels `LUX-P3Q-V1-SHA3` / `LUX-P3Q-V1-KECCAK`,
   per-observation tags `LUX-P3Q-V1-{HEADER,PUBLIC-INPUT,TRACE-COMMIT,
@@ -101,8 +147,9 @@ crates/
   the generic kernel.
 - Bit-reverse leaf permutation (v2): would collapse the per-query
   dual auth paths into single paths. Current v1 wire ships two paths
-  per layer pair for simplicity at ~2x byte cost; still ~30 KB for the
-  toy AIR which is fine.
+  per layer pair for simplicity at ~2x byte cost; 53 KB for the toy
+  AIR at the 128-bit floor (64 queries), up from 30 KB when the toy
+  ran at 16 queries and 48 conjectured bits.
 - Constant-time annotation review: kernel uses only Goldilocks ops and
   cSHAKE256 (both CT by construction). Branch on echoed query-index
   mismatch is a public-time decision (transcript-derived comparison),
